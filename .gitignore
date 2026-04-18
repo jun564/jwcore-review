@@ -1,0 +1,29 @@
+# Maven build artifacts
+target/
+*.class
+
+# IDE files
+.idea/
+*.iml
+*.iws
+.vscode/
+
+# Logs
+*.log
+
+# Chronicle Queue runtime data
+data/
+cq-data/
+**/*.cq4
+**/*.cq4t
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Zip archives
+*.zip
+*.tar.gz
+
+# Scratch files
+sources_sprint*.txt
