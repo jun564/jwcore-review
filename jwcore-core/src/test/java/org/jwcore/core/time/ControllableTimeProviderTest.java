@@ -2,7 +2,6 @@ package org.jwcore.core.time;
 
 import org.junit.jupiter.api.Test;
 
-import java.time.Duration;
 import java.time.Instant;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -12,8 +11,9 @@ class ControllableTimeProviderTest {
     @Test
     void shouldAdvanceTimeWithoutSleeping() {
         ControllableTimeProvider provider = new ControllableTimeProvider(100L, Instant.parse("2026-04-18T19:00:00Z"));
-        provider.advanceBy(Duration.ofSeconds(5));
-        assertEquals(100L + Duration.ofSeconds(5).toNanos(), provider.monotonicTime());
+        provider.advanceMonotonicTime(50L);
+        provider.advanceEventTime(java.time.Duration.ofSeconds(5));
+        assertEquals(150L, provider.monotonicTime());
         assertEquals(Instant.parse("2026-04-18T19:00:05Z"), provider.eventTime());
     }
 

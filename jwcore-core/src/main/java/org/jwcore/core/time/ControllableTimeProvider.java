@@ -38,6 +38,21 @@ public final class ControllableTimeProvider implements ITimeProvider {
         eventTime.updateAndGet(current -> current.plus(duration));
     }
 
+    public void advanceMonotonicTime(final long nanos) {
+        if (nanos < 0L) {
+            throw new IllegalArgumentException("nanos cannot be negative");
+        }
+        monotonicTime.addAndGet(nanos);
+    }
+
+    public void advanceEventTime(final Duration duration) {
+        Objects.requireNonNull(duration, "duration cannot be null");
+        if (duration.isNegative()) {
+            throw new IllegalArgumentException("duration cannot be negative");
+        }
+        eventTime.updateAndGet(current -> current.plus(duration));
+    }
+
     public void setMonotonicTime(final long newMonotonicTime) {
         if (newMonotonicTime < 0L) {
             throw new IllegalArgumentException("newMonotonicTime cannot be negative");

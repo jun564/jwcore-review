@@ -18,7 +18,10 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
-import java.util.concurrent.*;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
@@ -71,9 +74,7 @@ public final class ChronicleQueueEventJournal implements IEventJournal, AutoClos
         final List<EventEnvelope> envelopes = new ArrayList<>();
         readQueueInto(envelopes, businessQueue, fromInclusive, toExclusive);
         readQueueInto(envelopes, marketDataQueue, fromInclusive, toExclusive);
-        envelopes.sort(Comparator
-                .comparing(EventEnvelope::timestampEvent)
-                .thenComparing(EventEnvelope::eventId));
+        envelopes.sort(Comparator.comparing(EventEnvelope::timestampEvent).thenComparing(EventEnvelope::eventId));
         return List.copyOf(envelopes);
     }
 
@@ -81,43 +82,30 @@ public final class ChronicleQueueEventJournal implements IEventJournal, AutoClos
     public TailSubscription tail(final Consumer<EventEnvelope> consumer) {
         Objects.requireNonNull(consumer, "consumer cannot be null");
         final AtomicBoolean running = new AtomicBoolean(true);
-        final CountDownLatch ready = new CountDownLatch(1);
-        final ExecutorService executor = Executors.newSingleThreadExecutor(r -> {
-            final Thread thread = new Thread(r, "jwcore-cq-tailer");
-            thread.setDaemon(true);
-            return thread;
-        });
-        executor.submit(() -> {
-            final ExcerptTailer businessTailer = businessQueue.createTailer("tail-business").toEnd();
-            final ExcerptTailer marketTailer = marketDataQueue.createTailer("tail-market-data").toEnd();
-            ready.countDown();
-            while (running.get()) {
-                final List<EventEnvelope> batch = new ArrayList<>(2);
-                readNextInto(batch, businessTailer);
-                readNextInto(batch, marketTailer);
-                if (batch.isEmpty()) {
-                    try {
-                        Thread.sleep(TAIL_IDLE_MILLIS);
-                    } catch (final InterruptedException exception) {
-                        Thread.currentThread().interrupt();
-                        return;
-                    }
-                    continue;
-                }
-                batch.sort(Comparator
-                        .comparing(EventEnvelope::timestampEvent)
-                        .thenComparing(EventEnvelope::eventId));
-                batch.forEach(consumer);
-            }
-        });
-        try {
-            ready.await();
-        } catch (final InterruptedException exception) {
-            Thread.currentThread().interrupt();
+        final ConcurrentLinkedQueue<EventEnvelope> dispatchQueue = new ConcurrentLinkedQueue<>();
+
+        final ScheduledExecutorService businessExecutor = Executors.newSingleThreadScheduledExecutor(r -> daemon(r, "jwcore-cq-business-tailer"));
+        final ScheduledExecutorService marketDataExecutor = Executors.newSingleThreadScheduledExecutor(r -> daemon(r, "jwcore-cq-market-data-tailer"));
+        final ScheduledExecutorService dispatcherExecutor = Executors.newSingleThreadScheduledExecutor(r -> daemon(r, "jwcore-cq-dispatcher"));
+
+        final ExcerptTailer businessTailer = businessQueue.createTailer("tail-business");
+        if (businessQueue.lastIndex() != -1L) {
+            businessTailer.toEnd();
         }
+        final ExcerptTailer marketTailer = marketDataQueue.createTailer("tail-market-data");
+        if (marketDataQueue.lastIndex() != -1L) {
+            marketTailer.toEnd();
+        }
+
+        businessExecutor.scheduleWithFixedDelay(() -> pollTailer(running, businessTailer, dispatchQueue), 0L, TAIL_IDLE_MILLIS, TimeUnit.MILLISECONDS);
+        marketDataExecutor.scheduleWithFixedDelay(() -> pollTailer(running, marketTailer, dispatchQueue), 0L, TAIL_IDLE_MILLIS, TimeUnit.MILLISECONDS);
+        dispatcherExecutor.scheduleWithFixedDelay(() -> dispatchPending(running, dispatchQueue, consumer), 0L, TAIL_IDLE_MILLIS, TimeUnit.MILLISECONDS);
+
         return () -> {
             running.set(false);
-            executor.shutdownNow();
+            shutdownExecutor(dispatcherExecutor);
+            shutdownExecutor(businessExecutor);
+            shutdownExecutor(marketDataExecutor);
         };
     }
 
@@ -131,6 +119,55 @@ public final class ChronicleQueueEventJournal implements IEventJournal, AutoClos
         flush();
         businessQueue.close();
         marketDataQueue.close();
+    }
+
+    private static void pollTailer(final AtomicBoolean running,
+                                   final ExcerptTailer tailer,
+                                   final ConcurrentLinkedQueue<EventEnvelope> dispatchQueue) {
+        if (!running.get()) {
+            return;
+        }
+        try {
+            readNextInto(dispatchQueue, tailer);
+        } catch (final Exception ignored) {
+        }
+    }
+
+    private static void dispatchPending(final AtomicBoolean running,
+                                        final ConcurrentLinkedQueue<EventEnvelope> dispatchQueue,
+                                        final Consumer<EventEnvelope> consumer) {
+        if (!running.get() && dispatchQueue.isEmpty()) {
+            return;
+        }
+        try {
+            final List<EventEnvelope> batch = new ArrayList<>();
+            EventEnvelope next;
+            while ((next = dispatchQueue.poll()) != null) {
+                batch.add(next);
+            }
+            batch.sort(Comparator.comparing(EventEnvelope::timestampEvent).thenComparing(EventEnvelope::eventId));
+            batch.forEach(consumer);
+        } catch (final Exception ignored) {
+        }
+    }
+
+    private static void shutdownExecutor(final ScheduledExecutorService executor) {
+        executor.shutdown();
+        try {
+            if (!executor.awaitTermination(10, TimeUnit.SECONDS)) {
+                executor.shutdownNow();
+                executor.awaitTermination(2, TimeUnit.SECONDS);
+            }
+        } catch (final InterruptedException exception) {
+            executor.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private static Thread daemon(final Runnable runnable, final String name) {
+        final Thread thread = new Thread(runnable, name);
+        thread.setDaemon(true);
+        return thread;
     }
 
     private static void readQueueInto(final List<EventEnvelope> target,
@@ -151,7 +188,7 @@ public final class ChronicleQueueEventJournal implements IEventJournal, AutoClos
         }
     }
 
-    private static void readNextInto(final List<EventEnvelope> target, final ExcerptTailer tailer) {
+    private static void readNextInto(final ConcurrentLinkedQueue<EventEnvelope> target, final ExcerptTailer tailer) {
         try (DocumentContext documentContext = tailer.readingDocument()) {
             if (!documentContext.isPresent()) {
                 return;

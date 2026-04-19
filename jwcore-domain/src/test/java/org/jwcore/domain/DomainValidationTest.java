@@ -90,7 +90,7 @@ class DomainValidationTest {
     @Test
     void shouldExposeEventTypeValues() {
         assertEquals(EventType.MarketDataEvent, EventType.valueOf("MarketDataEvent"));
-        assertEquals(5, EventType.values().length);
+        assertEquals(12, EventType.values().length);
     }
 
     @Test

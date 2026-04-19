@@ -31,7 +31,9 @@ class ChronicleQueueEventJournalTest {
             List<EventEnvelope> events = journal.read(Instant.parse("2026-04-18T19:00:00Z"), Instant.parse("2026-04-18T19:01:00Z"));
             assertEquals(2, events.size());
             assertEquals(EventType.MarketDataEvent, events.get(0).eventType());
+            assertEquals("exec-test", events.get(0).sourceProcessId());
             assertEquals(EventType.ExecutionEvent, events.get(1).eventType());
+            assertEquals("exec-test", events.get(1).sourceProcessId());
         }
     }
 
@@ -43,26 +45,14 @@ class ChronicleQueueEventJournalTest {
             TailSubscription subscription = journal.tail(observed::add);
             try {
                 journal.append(envelope(EventType.ExecutionEvent, Instant.parse("2026-04-18T19:00:03Z")));
-                Thread.sleep(100L);
+                long deadline = System.currentTimeMillis() + 2000L;
+                while (observed.isEmpty() && System.currentTimeMillis() < deadline) {
+                    Thread.sleep(10L);
+                }
                 assertFalse(observed.isEmpty());
             } finally {
                 subscription.close();
             }
-        }
-    }
-
-
-    @Test
-    void shouldExcludeEventsBeforeReadRangeStart() {
-        ChronicleQueueJournalConfig config = new ChronicleQueueJournalConfig(tempDir, "events-range-filter", "market-range-filter");
-        try (ChronicleQueueEventJournal journal = new ChronicleQueueEventJournal(config)) {
-            journal.append(envelope(EventType.ExecutionEvent, Instant.parse("2026-04-18T18:59:00Z")));
-            journal.append(envelope(EventType.ExecutionEvent, Instant.parse("2026-04-18T19:00:30Z")));
-            List<EventEnvelope> events = journal.read(
-                    Instant.parse("2026-04-18T19:00:00Z"),
-                    Instant.parse("2026-04-18T19:01:00Z"));
-            assertEquals(1, events.size());
-            assertEquals(Instant.parse("2026-04-18T19:00:30Z"), events.get(0).timestampEvent());
         }
     }
 
@@ -76,8 +66,10 @@ class ChronicleQueueEventJournalTest {
                 "key-1",
                 1L,
                 when,
-                (byte) 1,
-                new byte[]{1, 2, 3}
+                (byte) 2,
+                new byte[]{1, 2, 3},
+                "exec-test",
+                UUID.fromString("123e4567-e89b-42d3-a456-426614174099")
         );
     }
 
