@@ -103,6 +103,30 @@ class EventEnvelopeTest {
     }
 
     @Test
+    void shouldThrowWhenOrderIntentCorrelationIdDiffersFromIntentId() {
+        final UUID intentId = UUID.randomUUID();
+        final UUID differentCorrelationId = UUID.randomUUID();
+
+        final IllegalArgumentException exception = assertThrows(IllegalArgumentException.class, () ->
+                new EventEnvelope(
+                        UUID.randomUUID(),
+                        EventType.OrderIntentEvent,
+                        null,
+                        intentId.toString(),
+                        CanonicalId.parse("S07:I03:VA07-03:BA01"),
+                        "key",
+                        1L,
+                        Instant.parse("2026-04-18T19:00:00Z"),
+                        (byte) 1,
+                        new byte[]{1},
+                        "exec-test",
+                        differentCorrelationId
+                ));
+
+        assertTrue(exception.getMessage().contains("OrderIntentEvent.correlationId musi byc rowny intentId"));
+    }
+
+    @Test
     void shouldRejectDeserializeNullAndCorruptBytes() {
         assertThrows(NullPointerException.class, () -> EventEnvelope.deserialize(null));
         assertThrows(IllegalArgumentException.class, () -> EventEnvelope.deserialize(new byte[]{1, 2, 3}));

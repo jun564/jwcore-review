@@ -250,7 +250,9 @@ class ExecutionRuntimeTest {
                 time.monotonicTime(),
                 time.eventTime(),
                 (byte) 1,
-                payload
+                payload,
+                "forex-runtime-test",
+                intentId
         );
     }
 }
