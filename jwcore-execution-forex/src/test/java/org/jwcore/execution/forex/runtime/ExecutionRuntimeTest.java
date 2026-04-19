@@ -58,10 +58,57 @@ class ExecutionRuntimeTest {
         final var brokerSession = new StubBrokerSession();
         final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.SAFE, 5, 10, 100_000);
 
-        journal.append(orderIntentEvent(time, UUID.randomUUID(), "BTCUSDT|0.10", "S07:I03:VA07-03:BA01"));
+        final UUID rejectedIntentId = UUID.randomUUID();
+        journal.append(orderIntentEvent(time, rejectedIntentId, "BTCUSDT|0.10", "S07:I03:VA07-03:BA01"));
         runtime.tickCycle();
+
         assertEquals(0, brokerSession.submitted().size());
         assertEquals(ExecutionState.SAFE, runtime.currentState());
+        assertEquals(0, runtime.pendingIntents());
+
+        final var rejectedEvents = journal.all().stream()
+                .filter(e -> e.eventType() == EventType.OrderRejectedEvent)
+                .toList();
+        assertEquals(1, rejectedEvents.size());
+        final EventEnvelope rejected = rejectedEvents.get(0);
+        assertEquals("SAFE_STATE", extractRejectReasonCode(rejected));
+        assertEquals(rejectedIntentId, rejected.correlationId());
+        assertEquals("forex-execution-node-test", rejected.sourceProcessId());
+
+        final UUID pendingIntent = UUID.randomUUID();
+        journal.append(orderIntentEvent(time, pendingIntent, "ETHUSD|0.20", "S07:I04:VA07-04:BA01"));
+        final var runRuntime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.RUN, 5, 10, 100_000);
+        runRuntime.tickCycle();
+        assertEquals(1, runRuntime.pendingIntents());
+
+        time.advanceBy(Duration.ofSeconds(5));
+        runRuntime.tickCycle();
+        assertTrue(journal.all().stream().anyMatch(e -> e.eventType() == EventType.OrderTimeoutEvent));
+    }
+
+    @Test
+    void shouldRejectOrderIntentInHaltStateWithEvent() {
+        final var journal = new InMemoryEventJournal();
+        final var time = new ControllableTimeProvider(1L, Instant.parse("2026-04-19T08:00:00Z"));
+        final var brokerSession = new StubBrokerSession();
+        final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.HALT, 5, 10, 100_000);
+
+        final UUID rejectedIntentId = UUID.randomUUID();
+        journal.append(orderIntentEvent(time, rejectedIntentId, "BTCUSDT|0.10", "S07:I03:VA07-03:BA01"));
+        runtime.tickCycle();
+
+        assertEquals(0, brokerSession.submitted().size());
+        assertEquals(ExecutionState.HALT, runtime.currentState());
+        assertEquals(0, runtime.pendingIntents());
+
+        final var rejectedEvents = journal.all().stream()
+                .filter(e -> e.eventType() == EventType.OrderRejectedEvent)
+                .toList();
+        assertEquals(1, rejectedEvents.size());
+        final EventEnvelope rejected = rejectedEvents.get(0);
+        assertEquals("HALT_STATE", extractRejectReasonCode(rejected));
+        assertEquals(rejectedIntentId, rejected.correlationId());
+        assertEquals("forex-execution-node-test", rejected.sourceProcessId());
 
         final UUID pendingIntent = UUID.randomUUID();
         journal.append(orderIntentEvent(time, pendingIntent, "ETHUSD|0.20", "S07:I04:VA07-04:BA01"));
@@ -168,6 +215,10 @@ class ExecutionRuntimeTest {
         assertEquals(2, runtime.processedEvents());
     }
 
+    private static String extractRejectReasonCode(final EventEnvelope envelope) {
+        return new String(envelope.payload(), StandardCharsets.UTF_8).split("\\|", 3)[1];
+    }
+
     private static ExecutionRuntime runtime(final InMemoryEventJournal journal,
                                             final ControllableTimeProvider time,
                                             final StubBrokerSession brokerSession,
@@ -199,7 +250,9 @@ class ExecutionRuntimeTest {
                 time.monotonicTime(),
                 time.eventTime(),
                 (byte) 1,
-                payload
+                payload,
+                "forex-runtime-test",
+                intentId
         );
     }
 }

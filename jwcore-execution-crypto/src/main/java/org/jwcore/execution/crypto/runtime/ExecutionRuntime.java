@@ -6,9 +6,11 @@ import org.jwcore.domain.EventEnvelope;
 import org.jwcore.domain.EventType;
 import org.jwcore.domain.Instrument;
 import org.jwcore.domain.OrderIntent;
+import org.jwcore.domain.RejectReason;
 import org.jwcore.execution.common.emit.EventEmitter;
 import org.jwcore.execution.common.events.RiskDecisionEvent;
 import org.jwcore.execution.common.registry.IntentRegistry;
+import org.jwcore.execution.common.runtime.PendingIntent;
 import org.jwcore.execution.common.state.ExecutionState;
 import org.jwcore.execution.common.state.ExecutionStateResolver;
 import org.jwcore.execution.crypto.broker.BrokerSession;
@@ -66,9 +68,8 @@ public final class ExecutionRuntime {
         final ExecutionState targetState = stateResolver.resolve(localDecision, globalDecision);
         applyState(targetState);
 
-        if (currentState == ExecutionState.RUN) {
-            processOrderIntents(freshEvents);
-        }
+        intentRegistry.absorb(freshEvents);
+        processOrderIntents(freshEvents);
 
         intentRegistry.checkTimeouts();
 
@@ -107,10 +108,36 @@ public final class ExecutionRuntime {
             if (intentRegistry.findCanonicalId(intentId).isPresent()) {
                 continue;
             }
+            if (intentRegistry.isTerminated(envelope.correlationId())) {
+                continue;
+            }
             final OrderIntent orderIntent = parseOrderIntent(envelope);
-            brokerSession.submit(orderIntent);
-            intentRegistry.bind(intentId, orderIntent.canonicalId(), config.accountId(), envelope.timestampEvent(), config.orderTimeout().toMillis());
+            if (currentState == ExecutionState.RUN) {
+                brokerSession.submit(orderIntent);
+                intentRegistry.bind(intentId, orderIntent.canonicalId(), config.accountId(), envelope.timestampEvent(), config.orderTimeout().toMillis());
+                continue;
+            }
+            if (currentState == ExecutionState.SAFE) {
+                emitRejected(orderIntent, envelope, RejectReason.SAFE_STATE);
+                continue;
+            }
+            if (currentState == ExecutionState.HALT) {
+                emitRejected(orderIntent, envelope, RejectReason.HALT_STATE);
+                continue;
+            }
         }
+    }
+
+
+    private void emitRejected(final OrderIntent orderIntent, final EventEnvelope envelope, final RejectReason reason) {
+        final PendingIntent pendingIntent = new PendingIntent(
+                UUID.fromString(Objects.requireNonNull(envelope.localIntentId(), "localIntentId cannot be null")),
+                orderIntent.canonicalId(),
+                config.accountId(),
+                envelope.timestampEvent(),
+                config.orderTimeout().toMillis()
+        );
+        eventEmitter.emitOrderRejected(pendingIntent, reason);
     }
 
     private OrderIntent parseOrderIntent(final EventEnvelope envelope) {

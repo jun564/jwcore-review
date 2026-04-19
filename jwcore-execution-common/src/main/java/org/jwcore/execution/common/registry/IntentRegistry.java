@@ -2,6 +2,8 @@ package org.jwcore.execution.common.registry;
 
 import org.jwcore.core.time.ITimeProvider;
 import org.jwcore.domain.CanonicalId;
+import org.jwcore.domain.EventEnvelope;
+import org.jwcore.domain.EventType;
 import org.jwcore.execution.common.emit.EventEmitter;
 import org.jwcore.execution.common.events.OrderTimeoutEvent;
 import org.jwcore.execution.common.runtime.OrderTimeoutTracker;
@@ -9,7 +11,9 @@ import org.jwcore.execution.common.runtime.PendingIntent;
 
 import java.time.Instant;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -19,6 +23,7 @@ public final class IntentRegistry {
     private final Map<CanonicalId, UUID> byCanonicalId = new HashMap<>();
     private final OrderTimeoutTracker timeoutTracker;
     private final EventEmitter eventEmitter;
+    private final Set<UUID> terminatedCorrelationIds = new java.util.HashSet<>();
 
     public IntentRegistry(final ITimeProvider timeProvider, final EventEmitter eventEmitter) {
         this.timeoutTracker = new OrderTimeoutTracker(Objects.requireNonNull(timeProvider, "timeProvider cannot be null"));
@@ -56,6 +61,30 @@ public final class IntentRegistry {
 
     public int size() {
         return byIntentId.size();
+    }
+
+    public void markTerminated(final UUID correlationId) {
+        if (correlationId == null) {
+            return;
+        }
+        terminatedCorrelationIds.add(correlationId);
+    }
+
+    public boolean isTerminated(final UUID correlationId) {
+        return correlationId != null && terminatedCorrelationIds.contains(correlationId);
+    }
+
+    public void absorb(final List<EventEnvelope> events) {
+        for (final EventEnvelope event : events) {
+            if (event == null) {
+                continue;
+            }
+            if (event.eventType() == EventType.OrderRejectedEvent
+                    || event.eventType() == EventType.OrderTimeoutEvent
+                    || event.eventType() == EventType.OrderFilledEvent) {
+                markTerminated(event.correlationId());
+            }
+        }
     }
 
     private void handleTimeout(final OrderTimeoutEvent orderTimeoutEvent) {

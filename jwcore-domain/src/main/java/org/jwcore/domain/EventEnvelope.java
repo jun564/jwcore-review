@@ -63,7 +63,30 @@ public record EventEnvelope(
         if (payloadVersion < 0) {
             throw new IllegalArgumentException("payloadVersion cannot be negative");
         }
+        validateOrderIntentCorrelation(localIntentId, eventType, correlationId);
         payload = payload == null ? new byte[0] : Arrays.copyOf(payload, payload.length);
+    }
+
+
+    private static void validateOrderIntentCorrelation(final String localIntentId,
+                                                       final EventType eventType,
+                                                       final UUID correlationId) {
+        if (eventType != EventType.OrderIntentEvent || correlationId == null) {
+            return;
+        }
+        if (localIntentId == null) {
+            return;
+        }
+        final UUID intentId;
+        try {
+            intentId = UUID.fromString(localIntentId);
+        } catch (final IllegalArgumentException ignored) {
+            return;
+        }
+        if (!correlationId.equals(intentId)) {
+            throw new IllegalArgumentException("OrderIntentEvent.correlationId musi byc rowny intentId (ADR-015). correlationId="
+                    + correlationId + " intentId=" + intentId);
+        }
     }
 
     @Override
