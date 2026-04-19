@@ -38,7 +38,7 @@ class OrderTimeoutMonitorTest {
                 new byte[]{1});
 
         monitor.registerPending(orderIntent);
-        timeProvider.advanceBy(Duration.ofSeconds(6));
+        timeProvider.advanceMonotonicTime(Duration.ofSeconds(6).toNanos());
         List<EventEnvelope> timedOut = monitor.scanTimeouts();
 
         assertEquals(1, timedOut.size());
@@ -57,7 +57,7 @@ class OrderTimeoutMonitorTest {
                 CanonicalId.parse("S07:I03:VA07-03:BA01"), "key", 0L, Instant.now(), (byte) 1, new byte[0]);
         monitor.registerPending(orderIntent);
         assertTrue(monitor.markTerminal("LI-002"));
-        timeProvider.advanceBy(Duration.ofSeconds(6));
+        timeProvider.advanceMonotonicTime(Duration.ofSeconds(6).toNanos());
         assertTrue(monitor.scanTimeouts().isEmpty());
         assertTrue(journal.events.isEmpty());
     }

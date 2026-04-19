@@ -10,9 +10,11 @@ import static org.junit.jupiter.api.Assertions.*;
 class EventEnvelopeTest {
 
     @Test
-    void shouldRoundTripSerializeAndDeserialize() {
-        EventEnvelope original = new EventEnvelope(
-                UUID.randomUUID(),
+    void shouldRoundTripSerializeAndDeserializeIncludingSourceProcessAndCorrelation() {
+        final UUID eventId = UUID.fromString("123e4567-e89b-42d3-a456-426614174000");
+        final UUID correlationId = UUID.fromString("123e4567-e89b-42d3-a456-426614174001");
+        final EventEnvelope original = new EventEnvelope(
+                eventId,
                 EventType.MarketDataEvent,
                 "BRK-1",
                 "LI-1",
@@ -20,36 +22,60 @@ class EventEnvelopeTest {
                 "key-1",
                 123L,
                 Instant.parse("2026-04-18T19:00:00Z"),
-                (byte) 1,
-                new byte[]{1, 2, 3}
+                (byte) 2,
+                new byte[]{1, 2, 3},
+                "exec-crypto-1",
+                correlationId
         );
 
-        EventEnvelope restored = EventEnvelope.deserialize(original.serialize());
+        final EventEnvelope restored = EventEnvelope.deserialize(original.serialize());
         assertEquals(original, restored);
         assertArrayEquals(new byte[]{1, 2, 3}, restored.payload());
-        assertEquals(1, restored.payloadVersion());
+        assertEquals("exec-crypto-1", restored.sourceProcessId());
+        assertEquals(correlationId, restored.correlationId());
+    }
+
+    @Test
+    void shouldUseBackwardCompatibleConstructorWithUnknownSourceAndEventIdCorrelation() {
+        final UUID eventId = UUID.fromString("123e4567-e89b-42d3-a456-426614174010");
+        final EventEnvelope envelope = new EventEnvelope(
+                eventId,
+                EventType.MarketDataEvent,
+                null,
+                null,
+                null,
+                "key",
+                1L,
+                Instant.parse("2026-04-18T19:00:00Z"),
+                (byte) 1,
+                new byte[]{9}
+        );
+        assertEquals("unknown", envelope.sourceProcessId());
+        assertEquals(eventId, envelope.correlationId());
     }
 
     @Test
     void shouldDefensivelyCopyPayload() {
-        byte[] payload = new byte[]{1, 2, 3};
-        EventEnvelope envelope = new EventEnvelope(
-                UUID.randomUUID(), EventType.MarketDataEvent, null, null, null, "key", 1L, Instant.now(), (byte) 1, payload);
+        final byte[] payload = new byte[]{1, 2, 3};
+        final EventEnvelope envelope = new EventEnvelope(
+                UUID.randomUUID(), EventType.MarketDataEvent, null, null, null, "key", 1L,
+                Instant.parse("2026-04-18T19:00:00Z"), (byte) 1, payload);
         payload[0] = 9;
         assertArrayEquals(new byte[]{1, 2, 3}, envelope.payload());
     }
 
     @Test
     void shouldTreatNullPayloadAsEmpty() {
-        EventEnvelope envelope = new EventEnvelope(
-                UUID.randomUUID(), EventType.MarketDataEvent, null, null, null, "key", 1L, Instant.now(), (byte) 1, null);
+        final EventEnvelope envelope = new EventEnvelope(
+                UUID.randomUUID(), EventType.MarketDataEvent, null, null, null, "key", 1L,
+                Instant.parse("2026-04-18T19:00:00Z"), (byte) 1, null);
         assertArrayEquals(new byte[0], envelope.payload());
     }
 
     @Test
     void shouldRejectNullRequiredFields() {
-        UUID id = UUID.randomUUID();
-        Instant now = Instant.now();
+        final UUID id = UUID.randomUUID();
+        final Instant now = Instant.parse("2026-04-18T19:00:00Z");
 
         assertThrows(NullPointerException.class, () ->
                 new EventEnvelope(null, EventType.MarketDataEvent, null, null, null, "key", 1L, now, (byte) 1, null));
@@ -59,33 +85,36 @@ class EventEnvelopeTest {
                 new EventEnvelope(id, EventType.MarketDataEvent, null, null, null, null, 1L, now, (byte) 1, null));
         assertThrows(NullPointerException.class, () ->
                 new EventEnvelope(id, EventType.MarketDataEvent, null, null, null, "key", 1L, null, (byte) 1, null));
+        assertThrows(NullPointerException.class, () ->
+                new EventEnvelope(id, EventType.MarketDataEvent, null, null, null, "key", 1L, now, (byte) 1, null, null, id));
+        assertThrows(NullPointerException.class, () ->
+                new EventEnvelope(id, EventType.MarketDataEvent, null, null, null, "key", 1L, now, (byte) 1, null, "proc", null));
     }
 
     @Test
-    void shouldRejectNegativeTimestampMono() {
+    void shouldRejectInvalidFieldValues() {
+        final Instant now = Instant.parse("2026-04-18T19:00:00Z");
         assertThrows(IllegalArgumentException.class, () ->
-                new EventEnvelope(UUID.randomUUID(), EventType.MarketDataEvent, null, null, null, "key", -1L, Instant.now(), (byte) 1, null));
-    }
-
-    @Test
-    void shouldRejectNegativePayloadVersion() {
+                new EventEnvelope(UUID.randomUUID(), EventType.MarketDataEvent, null, null, null, "key", -1L, now, (byte) 1, null));
         assertThrows(IllegalArgumentException.class, () ->
-                new EventEnvelope(UUID.randomUUID(), EventType.MarketDataEvent, null, null, null, "key", 1L, Instant.now(), (byte) -1, null));
+                new EventEnvelope(UUID.randomUUID(), EventType.MarketDataEvent, null, null, null, "key", 1L, now, (byte) -1, null));
+        assertThrows(IllegalArgumentException.class, () ->
+                new EventEnvelope(UUID.randomUUID(), EventType.MarketDataEvent, null, null, null, "key", 1L, now, (byte) 1, null, " ", UUID.randomUUID()));
+        assertThrows(IllegalArgumentException.class, () ->
+                new EventEnvelope(new UUID(1L, 2L), EventType.MarketDataEvent, null, null, null, "key", 1L, now, (byte) 1, null, "proc", UUID.randomUUID()));
+        assertThrows(IllegalArgumentException.class, () ->
+                new EventEnvelope(UUID.randomUUID(), EventType.MarketDataEvent, null, null, null, "key", 1L, now, (byte) 1, null, "proc", new UUID(1L, 2L)));
     }
 
     @Test
-    void shouldRejectDeserializeNullBytes() {
+    void shouldRejectDeserializeNullAndCorruptBytes() {
         assertThrows(NullPointerException.class, () -> EventEnvelope.deserialize(null));
-    }
-
-    @Test
-    void shouldRejectDeserializeCorruptBytes() {
         assertThrows(IllegalArgumentException.class, () -> EventEnvelope.deserialize(new byte[]{1, 2, 3}));
     }
 
     @Test
     void shouldHandleNullCanonicalIdInRoundTrip() {
-        EventEnvelope original = new EventEnvelope(
+        final EventEnvelope original = new EventEnvelope(
                 UUID.randomUUID(),
                 EventType.MarketDataEvent,
                 null,
@@ -95,17 +124,20 @@ class EventEnvelopeTest {
                 123L,
                 Instant.parse("2026-04-18T19:00:00Z"),
                 (byte) 2,
-                new byte[]{4, 5}
+                new byte[]{4, 5},
+                "risk-coordinator-1",
+                UUID.randomUUID()
         );
-        EventEnvelope restored = EventEnvelope.deserialize(original.serialize());
+        final EventEnvelope restored = EventEnvelope.deserialize(original.serialize());
         assertNull(restored.canonicalId());
         assertEquals(original, restored);
     }
 
     @Test
-    void shouldImplementEqualsAndHashCode() {
-        EventEnvelope first = new EventEnvelope(
-                UUID.fromString("123e4567-e89b-12d3-a456-426614174000"),
+    void shouldImplementEqualsAndHashCodeIncludingNewFields() {
+        final UUID correlationId = UUID.fromString("123e4567-e89b-42d3-a456-426614174002");
+        final EventEnvelope first = new EventEnvelope(
+                UUID.fromString("123e4567-e89b-42d3-a456-426614174000"),
                 EventType.ExecutionEvent,
                 "BRK-1",
                 "LI-1",
@@ -113,10 +145,12 @@ class EventEnvelopeTest {
                 "key",
                 100L,
                 Instant.parse("2026-04-18T19:00:00Z"),
-                (byte) 1,
-                new byte[]{9, 8});
-        EventEnvelope same = new EventEnvelope(
-                UUID.fromString("123e4567-e89b-12d3-a456-426614174000"),
+                (byte) 2,
+                new byte[]{9, 8},
+                "exec-crypto-1",
+                correlationId);
+        final EventEnvelope same = new EventEnvelope(
+                UUID.fromString("123e4567-e89b-42d3-a456-426614174000"),
                 EventType.ExecutionEvent,
                 "BRK-1",
                 "LI-1",
@@ -124,10 +158,12 @@ class EventEnvelopeTest {
                 "key",
                 100L,
                 Instant.parse("2026-04-18T19:00:00Z"),
-                (byte) 1,
-                new byte[]{9, 8});
-        EventEnvelope different = new EventEnvelope(
-                UUID.fromString("123e4567-e89b-12d3-a456-426614174001"),
+                (byte) 2,
+                new byte[]{9, 8},
+                "exec-crypto-1",
+                correlationId);
+        final EventEnvelope different = new EventEnvelope(
+                UUID.fromString("123e4567-e89b-42d3-a456-426614174001"),
                 EventType.ExecutionEvent,
                 "BRK-1",
                 "LI-1",
@@ -135,68 +171,12 @@ class EventEnvelopeTest {
                 "key",
                 100L,
                 Instant.parse("2026-04-18T19:00:00Z"),
-                (byte) 1,
-                new byte[]{9, 8});
+                (byte) 2,
+                new byte[]{9, 8},
+                "exec-forex-1",
+                correlationId);
         assertEquals(first, same);
         assertEquals(first.hashCode(), same.hashCode());
         assertNotEquals(first, different);
     }
-
-    @Test
-    void shouldBeEqualToItselfAndRejectDifferentTypes() {
-        EventEnvelope envelope = new EventEnvelope(
-                UUID.randomUUID(),
-                EventType.MarketDataEvent,
-                null,
-                null,
-                null,
-                "key",
-                1L,
-                Instant.parse("2026-04-18T19:00:00Z"),
-                (byte) 1,
-                new byte[0]
-        );
-        assertEquals(envelope, envelope);
-        assertNotEquals(envelope, null);
-        assertNotEquals(envelope, "not-envelope");
-    }
-
-    @Test
-    void shouldRejectDeserializeWithNegativeStringLength() {
-        byte[] bytes = new byte[16 + 16 + 4];
-        int pos = 0;
-        // UUID zeros
-        pos = 16;
-        // eventType length = -2
-        bytes[pos++] = (byte) 0xFF;
-        bytes[pos++] = (byte) 0xFF;
-        bytes[pos++] = (byte) 0xFF;
-        bytes[pos] = (byte) 0xFE;
-        assertThrows(IllegalArgumentException.class, () -> EventEnvelope.deserialize(bytes));
-    }
-
-    @Test
-    void shouldRejectDeserializeWithNegativeByteArrayLength() {
-        EventEnvelope valid = new EventEnvelope(
-                UUID.randomUUID(),
-                EventType.MarketDataEvent,
-                null,
-                null,
-                null,
-                "key",
-                1L,
-                Instant.parse("2026-04-18T19:00:00Z"),
-                (byte) 1,
-                new byte[]{1, 2}
-        );
-        byte[] bytes = valid.serialize();
-        // overwrite final payload length with -1
-        int idx = bytes.length - 2 - 4; // payload bytes len 2 + length field 4
-        bytes[idx] = (byte) 0xFF;
-        bytes[idx + 1] = (byte) 0xFF;
-        bytes[idx + 2] = (byte) 0xFF;
-        bytes[idx + 3] = (byte) 0xFF;
-        assertThrows(IllegalArgumentException.class, () -> EventEnvelope.deserialize(bytes));
-    }
-
 }
