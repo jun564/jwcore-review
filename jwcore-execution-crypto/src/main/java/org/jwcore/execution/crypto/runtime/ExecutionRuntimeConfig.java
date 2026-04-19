@@ -8,7 +8,8 @@ public record ExecutionRuntimeConfig(
         Duration orderTimeout,
         int marginEmitEveryNCycles,
         long tickIntervalMs,
-        int processedEventsCapacity) {
+        int processedEventsCapacity,
+        String nodeId) {
 
     public ExecutionRuntimeConfig {
         Objects.requireNonNull(accountId, "accountId cannot be null");
@@ -25,5 +26,6 @@ public record ExecutionRuntimeConfig(
         if (processedEventsCapacity <= 0) {
             throw new IllegalArgumentException("processedEventsCapacity must be positive");
         }
+        Objects.requireNonNull(nodeId, "nodeId cannot be null");
     }
 }

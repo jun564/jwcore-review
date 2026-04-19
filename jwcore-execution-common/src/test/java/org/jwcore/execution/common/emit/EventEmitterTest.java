@@ -3,6 +3,7 @@ package org.jwcore.execution.common.emit;
 import org.jwcore.core.time.ControllableTimeProvider;
 import org.jwcore.domain.CanonicalId;
 import org.jwcore.domain.EventType;
+import org.jwcore.domain.RejectReason;
 import org.jwcore.execution.common.events.Discrepancy;
 import org.jwcore.execution.common.events.RebuildType;
 import org.jwcore.execution.common.runtime.PendingIntent;
@@ -37,10 +38,17 @@ class EventEmitterTest {
         assertEquals(margin.envelope().eventId(), margin.envelope().correlationId());
 
         final UUID intentId = UUID.randomUUID();
-        final var timeout = emitter.createOrderTimeoutEvent(new PendingIntent(intentId, CanonicalId.parse("S07:I03:VA07-03:BA01"), "crypto", time.eventTime(), 5000L));
+        final var pendingIntent = new PendingIntent(intentId, CanonicalId.parse("S07:I03:VA07-03:BA01"), "crypto", time.eventTime(), 5000L);
+        final var timeout = emitter.createOrderTimeoutEvent(pendingIntent);
         emitter.emit(timeout.envelope());
         assertEquals(EventType.OrderTimeoutEvent, journal.all().get(2).eventType());
         assertEquals(intentId, timeout.envelope().correlationId());
+
+        final var rejected = emitter.emitOrderRejected(pendingIntent, RejectReason.RISK_LIMIT);
+        assertEquals(EventType.OrderRejectedEvent, journal.all().get(3).eventType());
+        assertEquals("exec-crypto-1", rejected.envelope().sourceProcessId());
+        assertEquals(intentId, rejected.envelope().correlationId());
+        assertEquals(RejectReason.RISK_LIMIT, rejected.reason());
 
         final var rebuilt = emitter.createStateRebuiltEvent(
                 "crypto",
@@ -52,8 +60,8 @@ class EventEmitterTest {
                 List.of(new Discrepancy("desc", "expected", "actual", time.eventTime()))
         );
         emitter.emit(rebuilt.envelope());
-        assertEquals(EventType.StateRebuiltEvent, journal.all().get(3).eventType());
-        assertEquals(4, journal.all().size());
+        assertEquals(EventType.StateRebuiltEvent, journal.all().get(4).eventType());
+        assertEquals(5, journal.all().size());
         assertNotNull(rebuilt.envelope().correlationId());
     }
 }

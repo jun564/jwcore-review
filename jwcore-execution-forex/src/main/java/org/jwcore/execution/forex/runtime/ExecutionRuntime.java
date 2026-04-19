@@ -49,7 +49,7 @@ public final class ExecutionRuntime {
         this.timeProvider = Objects.requireNonNull(timeProvider, "timeProvider cannot be null");
         this.brokerSession = Objects.requireNonNull(brokerSession, "brokerSession cannot be null");
         this.localRiskPolicy = Objects.requireNonNull(localRiskPolicy, "localRiskPolicy cannot be null");
-        this.eventEmitter = new EventEmitter(eventJournal, timeProvider, "exec-forex-1");
+        this.eventEmitter = new EventEmitter(eventJournal, timeProvider, config.nodeId());
         this.intentRegistry = new IntentRegistry(timeProvider, eventEmitter);
         this.processedEventIds = java.util.Collections.newSetFromMap(new BoundedUuidMap(config.processedEventsCapacity()));
     }
