@@ -119,6 +119,7 @@ public final class ExecutionRuntime {
             }
             if (currentState == ExecutionState.HALT) {
                 emitRejected(orderIntent, envelope, RejectReason.HALT_STATE);
+                continue;
             }
         }
     }
