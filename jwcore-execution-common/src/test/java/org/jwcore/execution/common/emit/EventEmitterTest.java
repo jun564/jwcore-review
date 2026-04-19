@@ -45,7 +45,7 @@ class EventEmitterTest {
         assertEquals(intentId, timeout.envelope().correlationId());
 
         final var rejected = emitter.emitOrderRejected(pendingIntent, RejectReason.RISK_LIMIT);
-        assertEquals(EventType.ORDER_REJECTED, journal.all().get(3).eventType());
+        assertEquals(EventType.OrderRejectedEvent, journal.all().get(3).eventType());
         assertEquals("exec-crypto-1", rejected.envelope().sourceProcessId());
         assertEquals(intentId, rejected.envelope().correlationId());
         assertEquals(RejectReason.RISK_LIMIT, rejected.reason());

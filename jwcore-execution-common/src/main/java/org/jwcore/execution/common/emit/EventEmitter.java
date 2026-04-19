@@ -120,7 +120,7 @@ public final class EventEmitter {
         final byte[] payload = String.join("|", intent.intentId().toString(), reason.name(), now.toString())
                 .getBytes(StandardCharsets.UTF_8);
         final EventEnvelope envelope = createEnvelope(
-                EventType.ORDER_REJECTED,
+                EventType.OrderRejectedEvent,
                 null,
                 intent.intentId().toString(),
                 intent.canonicalId(),
