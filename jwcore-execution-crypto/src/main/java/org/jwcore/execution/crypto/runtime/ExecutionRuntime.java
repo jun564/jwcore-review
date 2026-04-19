@@ -68,6 +68,7 @@ public final class ExecutionRuntime {
         final ExecutionState targetState = stateResolver.resolve(localDecision, globalDecision);
         applyState(targetState);
 
+        intentRegistry.absorb(freshEvents);
         processOrderIntents(freshEvents);
 
         intentRegistry.checkTimeouts();
@@ -105,6 +106,9 @@ public final class ExecutionRuntime {
             }
             final UUID intentId = UUID.fromString(Objects.requireNonNull(envelope.localIntentId(), "localIntentId cannot be null"));
             if (intentRegistry.findCanonicalId(intentId).isPresent()) {
+                continue;
+            }
+            if (intentRegistry.isTerminated(envelope.correlationId())) {
                 continue;
             }
             final OrderIntent orderIntent = parseOrderIntent(envelope);
