@@ -176,7 +176,7 @@ class ExecutionRuntimeTest {
                                             final int marginEveryCycles,
                                             final int processedCapacity) {
         return new ExecutionRuntime(
-                new ExecutionRuntimeConfig("crypto", Duration.ofSeconds(timeoutSeconds), marginEveryCycles, 100L, processedCapacity),
+                new ExecutionRuntimeConfig("crypto", Duration.ofSeconds(timeoutSeconds), marginEveryCycles, 100L, processedCapacity, "crypto-execution-node-test"),
                 journal,
                 time,
                 brokerSession,

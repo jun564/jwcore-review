@@ -48,15 +48,13 @@ public record EventEnvelope(
         Objects.requireNonNull(eventType, "eventType cannot be null");
         Objects.requireNonNull(idempotencyKey, "idempotencyKey cannot be null");
         Objects.requireNonNull(timestampEvent, "timestampEvent cannot be null");
-        Objects.requireNonNull(sourceProcessId, "sourceProcessId cannot be null");
-        Objects.requireNonNull(correlationId, "correlationId cannot be null");
-        if (sourceProcessId.isBlank()) {
+        if (sourceProcessId != null && sourceProcessId.isBlank()) {
             throw new IllegalArgumentException("sourceProcessId cannot be blank");
         }
         if (eventId.version() != 4) {
             throw new IllegalArgumentException("eventId must be UUID v4");
         }
-        if (correlationId.version() != 4) {
+        if (correlationId != null && correlationId.version() != 4) {
             throw new IllegalArgumentException("correlationId must be UUID v4");
         }
         if (timestampMono < 0L) {
@@ -86,8 +84,8 @@ public record EventEnvelope(
             BinaryCodec.writeInstant(output, timestampEvent);
             BinaryCodec.writeByte(output, payloadVersion);
             BinaryCodec.writeByteArray(output, payload);
-            BinaryCodec.writeString(output, sourceProcessId);
-            BinaryCodec.writeUuid(output, correlationId);
+            BinaryCodec.writeNullableString(output, sourceProcessId);
+            BinaryCodec.writeNullableUuid(output, correlationId);
             return output.toByteArray();
         } catch (final IOException exception) {
             throw new IllegalStateException("Unexpected IO error during EventEnvelope serialization", exception);
@@ -109,8 +107,8 @@ public record EventEnvelope(
             final Instant timestampEvent = BinaryCodec.readInstant(input);
             final byte payloadVersion = BinaryCodec.readByte(input);
             final byte[] payload = BinaryCodec.readByteArray(input);
-            final String sourceProcessId = BinaryCodec.readString(input);
-            final UUID correlationId = BinaryCodec.readUuid(input);
+            final String sourceProcessId = input.available() > 0 ? BinaryCodec.readNullableString(input) : null;
+            final UUID correlationId = input.available() > 0 ? BinaryCodec.readCompatibleNullableUuid(input) : null;
             return new EventEnvelope(eventId, eventType, brokerOrderId, localIntentId, canonicalId, idempotencyKey,
                     timestampMono, timestampEvent, payloadVersion, payload, sourceProcessId, correlationId);
         } catch (final IOException exception) {
@@ -135,8 +133,8 @@ public record EventEnvelope(
                 && Objects.equals(canonicalId, other.canonicalId)
                 && idempotencyKey.equals(other.idempotencyKey)
                 && timestampEvent.equals(other.timestampEvent)
-                && sourceProcessId.equals(other.sourceProcessId)
-                && correlationId.equals(other.correlationId)
+                && Objects.equals(sourceProcessId, other.sourceProcessId)
+                && Objects.equals(correlationId, other.correlationId)
                 && Arrays.equals(payload, other.payload);
     }
 
@@ -156,6 +154,27 @@ public record EventEnvelope(
         }
         private static UUID readUuid(final ByteArrayInputStream input) throws IOException {
             return new UUID(readLong(input), readLong(input));
+        }
+        private static void writeNullableUuid(final ByteArrayOutputStream output, final UUID uuid) throws IOException {
+            if (uuid == null) {
+                writeByte(output, (byte) 0);
+                return;
+            }
+            writeByte(output, (byte) 1);
+            writeUuid(output, uuid);
+        }
+        private static UUID readCompatibleNullableUuid(final ByteArrayInputStream input) throws IOException {
+            if (input.available() == 16) {
+                return readUuid(input);
+            }
+            final byte marker = readByte(input);
+            if (marker == 0) {
+                return null;
+            }
+            if (marker == 1) {
+                return readUuid(input);
+            }
+            throw new IOException("Invalid nullable UUID marker");
         }
         private static void writeString(final ByteArrayOutputStream output, final String value) throws IOException {
             final byte[] bytes = value.getBytes(StandardCharsets.UTF_8);

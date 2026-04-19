@@ -176,7 +176,7 @@ class ExecutionRuntimeTest {
                                             final int marginEveryCycles,
                                             final int processedCapacity) {
         return new ExecutionRuntime(
-                new ExecutionRuntimeConfig("forex", Duration.ofSeconds(timeoutSeconds), marginEveryCycles, 100L, processedCapacity),
+                new ExecutionRuntimeConfig("forex", Duration.ofSeconds(timeoutSeconds), marginEveryCycles, 100L, processedCapacity, "forex-execution-node-test"),
                 journal,
                 time,
                 brokerSession,

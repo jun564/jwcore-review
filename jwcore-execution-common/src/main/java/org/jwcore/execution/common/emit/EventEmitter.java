@@ -6,6 +6,8 @@ import org.jwcore.domain.CanonicalId;
 import org.jwcore.domain.EventEnvelope;
 import org.jwcore.domain.EventType;
 import org.jwcore.domain.IdempotencyKeys;
+import org.jwcore.domain.RejectReason;
+import org.jwcore.domain.events.OrderRejectedEvent;
 import org.jwcore.execution.common.events.*;
 import org.jwcore.execution.common.runtime.PendingIntent;
 import org.jwcore.execution.common.state.ExecutionState;
@@ -109,6 +111,24 @@ public final class EventEmitter {
                 pendingIntent.canonicalId(), text.getBytes(StandardCharsets.UTF_8), pendingIntent.intentId());
         return new OrderTimeoutEvent(pendingIntent.intentId(), pendingIntent.canonicalId(), pendingIntent.accountId(),
                 pendingIntent.timeoutThresholdMs(), pendingIntent.emittedAt(), timeProvider.eventTime(), envelope);
+    }
+
+    public OrderRejectedEvent emitOrderRejected(final PendingIntent intent, final RejectReason reason) {
+        Objects.requireNonNull(intent, "intent cannot be null");
+        Objects.requireNonNull(reason, "reason cannot be null");
+        final Instant now = timeProvider.eventTime();
+        final byte[] payload = String.join("|", intent.intentId().toString(), reason.name(), now.toString())
+                .getBytes(StandardCharsets.UTF_8);
+        final EventEnvelope envelope = createEnvelope(
+                EventType.ORDER_REJECTED,
+                null,
+                intent.intentId().toString(),
+                intent.canonicalId(),
+                payload,
+                intent.intentId()
+        );
+        emit(envelope);
+        return new OrderRejectedEvent(intent.intentId().toString(), reason, now, envelope);
     }
 
     public StateRebuiltEvent createStateRebuiltEvent(final String accountId, final int snapshotVersion, final UUID rebuiltUntilEventId,

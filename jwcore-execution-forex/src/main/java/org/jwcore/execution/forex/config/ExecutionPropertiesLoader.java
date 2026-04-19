@@ -19,8 +19,9 @@ public final class ExecutionPropertiesLoader {
         final int marginEveryCycles = parsePositiveInt(properties, "margin.emit.every.cycles", 5);
         final long tickIntervalMs = parsePositiveLong(properties, "tick.interval.ms", 100L);
         final int processedEventsCapacity = parsePositiveInt(properties, "processed.events.capacity", 100000);
+        final String nodeId = Objects.requireNonNull(properties.getProperty("nodeId"), "nodeId cannot be null");
 
-        return new ExecutionRuntimeConfig(accountId, Duration.ofMillis(timeoutMs), marginEveryCycles, tickIntervalMs, processedEventsCapacity);
+        return new ExecutionRuntimeConfig(accountId, Duration.ofMillis(timeoutMs), marginEveryCycles, tickIntervalMs, processedEventsCapacity, nodeId);
     }
 
     private static int parsePositiveInt(final Properties properties, final String key, final int defaultValue) {

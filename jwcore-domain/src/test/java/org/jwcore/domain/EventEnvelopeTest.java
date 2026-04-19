@@ -85,10 +85,6 @@ class EventEnvelopeTest {
                 new EventEnvelope(id, EventType.MarketDataEvent, null, null, null, null, 1L, now, (byte) 1, null));
         assertThrows(NullPointerException.class, () ->
                 new EventEnvelope(id, EventType.MarketDataEvent, null, null, null, "key", 1L, null, (byte) 1, null));
-        assertThrows(NullPointerException.class, () ->
-                new EventEnvelope(id, EventType.MarketDataEvent, null, null, null, "key", 1L, now, (byte) 1, null, null, id));
-        assertThrows(NullPointerException.class, () ->
-                new EventEnvelope(id, EventType.MarketDataEvent, null, null, null, "key", 1L, now, (byte) 1, null, "proc", null));
     }
 
     @Test

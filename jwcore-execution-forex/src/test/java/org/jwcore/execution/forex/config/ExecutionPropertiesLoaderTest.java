@@ -13,13 +13,14 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 class ExecutionPropertiesLoaderTest {
     @Test
     void shouldLoadHappyPathProperties() throws Exception {
-        final String content = "account.id=forex\norder.timeout.ms=15000\nmargin.emit.every.cycles=4\ntick.interval.ms=200\nprocessed.events.capacity=123\n";
+        final String content = "account.id=forex\norder.timeout.ms=15000\nmargin.emit.every.cycles=4\ntick.interval.ms=200\nprocessed.events.capacity=123\nnodeId=forex-execution-node-1\n";
         final ExecutionRuntimeConfig config = new ExecutionPropertiesLoader().load(new ByteArrayInputStream(content.getBytes(StandardCharsets.UTF_8)), "default");
         assertEquals("forex", config.accountId());
         assertEquals(Duration.ofMillis(15000), config.orderTimeout());
         assertEquals(4, config.marginEmitEveryNCycles());
         assertEquals(200L, config.tickIntervalMs());
         assertEquals(123, config.processedEventsCapacity());
+        assertEquals("forex-execution-node-1", config.nodeId());
     }
 
     @Test

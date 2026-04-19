@@ -5,6 +5,7 @@ public enum EventType {
     OrderIntentEvent,
     ExecutionEvent,
     ParameterUpdatedEvent,
+    ORDER_REJECTED,
     OrderTimeoutEvent,
     RiskDecisionEvent,
     MarginUpdateEvent,
