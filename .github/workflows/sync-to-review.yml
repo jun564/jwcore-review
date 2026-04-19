@@ -1,0 +1,29 @@
+name: Sync to jwcore-review
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout jwcore
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Remove sensitive files
+        run: |
+          find . -name ".env" -o -name "*.key" -o -name "*credentials*" \
+            | grep -v ".git/" | xargs rm -f 2>/dev/null || true
+          git add -A && git commit -m "Remove sensitive" || true
+
+      - name: Push mirror to jwcore-review
+        run: |
+          git config user.email "github-actions@github.com"
+          git config user.name "github-actions"
+          git remote add review \
+            https://jun564:${{ secrets.JWCORE_REVIEW_TOKEN }}@github.com/jun564/jwcore-review.git
+          git push review main --force
