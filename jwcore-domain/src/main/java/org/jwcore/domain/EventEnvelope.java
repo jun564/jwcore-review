@@ -21,16 +21,44 @@ public record EventEnvelope(
         long timestampMono,
         Instant timestampEvent,
         byte payloadVersion,
-        byte[] payload) implements Serializable {
+        byte[] payload,
+        String sourceProcessId,
+        UUID correlationId) implements Serializable {
 
     @Serial
     private static final long serialVersionUID = 1L;
+
+    public EventEnvelope(
+            final UUID eventId,
+            final EventType eventType,
+            final String brokerOrderId,
+            final String localIntentId,
+            final CanonicalId canonicalId,
+            final String idempotencyKey,
+            final long timestampMono,
+            final Instant timestampEvent,
+            final byte payloadVersion,
+            final byte[] payload) {
+        this(eventId, eventType, brokerOrderId, localIntentId, canonicalId, idempotencyKey,
+                timestampMono, timestampEvent, payloadVersion, payload, "unknown", eventId);
+    }
 
     public EventEnvelope {
         Objects.requireNonNull(eventId, "eventId cannot be null");
         Objects.requireNonNull(eventType, "eventType cannot be null");
         Objects.requireNonNull(idempotencyKey, "idempotencyKey cannot be null");
         Objects.requireNonNull(timestampEvent, "timestampEvent cannot be null");
+        Objects.requireNonNull(sourceProcessId, "sourceProcessId cannot be null");
+        Objects.requireNonNull(correlationId, "correlationId cannot be null");
+        if (sourceProcessId.isBlank()) {
+            throw new IllegalArgumentException("sourceProcessId cannot be blank");
+        }
+        if (eventId.version() != 4) {
+            throw new IllegalArgumentException("eventId must be UUID v4");
+        }
+        if (correlationId.version() != 4) {
+            throw new IllegalArgumentException("correlationId must be UUID v4");
+        }
         if (timestampMono < 0L) {
             throw new IllegalArgumentException("timestampMono cannot be negative");
         }
@@ -58,6 +86,8 @@ public record EventEnvelope(
             BinaryCodec.writeInstant(output, timestampEvent);
             BinaryCodec.writeByte(output, payloadVersion);
             BinaryCodec.writeByteArray(output, payload);
+            BinaryCodec.writeString(output, sourceProcessId);
+            BinaryCodec.writeUuid(output, correlationId);
             return output.toByteArray();
         } catch (final IOException exception) {
             throw new IllegalStateException("Unexpected IO error during EventEnvelope serialization", exception);
@@ -79,18 +109,10 @@ public record EventEnvelope(
             final Instant timestampEvent = BinaryCodec.readInstant(input);
             final byte payloadVersion = BinaryCodec.readByte(input);
             final byte[] payload = BinaryCodec.readByteArray(input);
-            return new EventEnvelope(
-                    eventId,
-                    eventType,
-                    brokerOrderId,
-                    localIntentId,
-                    canonicalId,
-                    idempotencyKey,
-                    timestampMono,
-                    timestampEvent,
-                    payloadVersion,
-                    payload
-            );
+            final String sourceProcessId = BinaryCodec.readString(input);
+            final UUID correlationId = BinaryCodec.readUuid(input);
+            return new EventEnvelope(eventId, eventType, brokerOrderId, localIntentId, canonicalId, idempotencyKey,
+                    timestampMono, timestampEvent, payloadVersion, payload, sourceProcessId, correlationId);
         } catch (final IOException exception) {
             throw new IllegalArgumentException("Invalid EventEnvelope binary payload", exception);
         }
@@ -113,149 +135,81 @@ public record EventEnvelope(
                 && Objects.equals(canonicalId, other.canonicalId)
                 && idempotencyKey.equals(other.idempotencyKey)
                 && timestampEvent.equals(other.timestampEvent)
+                && sourceProcessId.equals(other.sourceProcessId)
+                && correlationId.equals(other.correlationId)
                 && Arrays.equals(payload, other.payload);
     }
 
     @Override
     public int hashCode() {
-        int result = Objects.hash(
-                eventId,
-                eventType,
-                brokerOrderId,
-                localIntentId,
-                canonicalId,
-                idempotencyKey,
-                timestampMono,
-                timestampEvent,
-                payloadVersion);
+        int result = Objects.hash(eventId, eventType, brokerOrderId, localIntentId, canonicalId, idempotencyKey,
+                timestampMono, timestampEvent, payloadVersion, sourceProcessId, correlationId);
         result = 31 * result + Arrays.hashCode(payload);
         return result;
     }
 
     private static final class BinaryCodec {
-        private BinaryCodec() {
-        }
-
+        private BinaryCodec() {}
         private static void writeUuid(final ByteArrayOutputStream output, final UUID uuid) throws IOException {
             writeLong(output, uuid.getMostSignificantBits());
             writeLong(output, uuid.getLeastSignificantBits());
         }
-
         private static UUID readUuid(final ByteArrayInputStream input) throws IOException {
             return new UUID(readLong(input), readLong(input));
         }
-
         private static void writeString(final ByteArrayOutputStream output, final String value) throws IOException {
             final byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
             writeInt(output, bytes.length);
             output.write(bytes);
         }
-
         private static String readString(final ByteArrayInputStream input) throws IOException {
             final int length = readInt(input);
-            if (length < 0) {
-                throw new IOException("Negative string length");
-            }
+            if (length < 0) throw new IOException("Negative string length");
             return new String(readFixedBytes(input, length), StandardCharsets.UTF_8);
         }
-
         private static void writeNullableString(final ByteArrayOutputStream output, final String value) throws IOException {
-            if (value == null) {
-                writeInt(output, -1);
-                return;
-            }
+            if (value == null) { writeInt(output, -1); return; }
             writeString(output, value);
         }
-
         private static String readNullableString(final ByteArrayInputStream input) throws IOException {
             final int length = readInt(input);
-            if (length == -1) {
-                return null;
-            }
-            if (length < -1) {
-                throw new IOException("Negative nullable string length");
-            }
+            if (length == -1) return null;
+            if (length < -1) throw new IOException("Negative nullable string length");
             return new String(readFixedBytes(input, length), StandardCharsets.UTF_8);
         }
-
         private static void writeInstant(final ByteArrayOutputStream output, final Instant instant) throws IOException {
             writeLong(output, instant.getEpochSecond());
             writeInt(output, instant.getNano());
         }
-
         private static Instant readInstant(final ByteArrayInputStream input) throws IOException {
-            final long epochSecond = readLong(input);
-            final int nano = readInt(input);
-            return Instant.ofEpochSecond(epochSecond, nano);
+            return Instant.ofEpochSecond(readLong(input), readInt(input));
         }
-
-        private static void writeByte(final ByteArrayOutputStream output, final byte value) throws IOException {
-            output.write(value);
-        }
-
+        private static void writeByte(final ByteArrayOutputStream output, final byte value) throws IOException { output.write(value); }
         private static byte readByte(final ByteArrayInputStream input) throws IOException {
-            final int value = input.read();
-            if (value < 0) {
-                throw new IOException("Unexpected end of stream while reading byte");
-            }
-            return (byte) value;
+            final int value = input.read(); if (value < 0) throw new IOException("Unexpected end of stream while reading byte"); return (byte) value;
         }
-
         private static void writeByteArray(final ByteArrayOutputStream output, final byte[] bytes) throws IOException {
-            writeInt(output, bytes.length);
-            output.write(bytes);
+            writeInt(output, bytes.length); output.write(bytes);
         }
-
         private static byte[] readByteArray(final ByteArrayInputStream input) throws IOException {
-            final int length = readInt(input);
-            if (length < 0) {
-                throw new IOException("Negative byte array length");
-            }
-            return readFixedBytes(input, length);
+            final int length = readInt(input); if (length < 0) throw new IOException("Negative byte array length"); return readFixedBytes(input, length);
         }
-
         private static void writeInt(final ByteArrayOutputStream output, final int value) throws IOException {
-            output.write((value >>> 24) & 0xFF);
-            output.write((value >>> 16) & 0xFF);
-            output.write((value >>> 8) & 0xFF);
-            output.write(value & 0xFF);
+            output.write((value >>> 24) & 0xFF); output.write((value >>> 16) & 0xFF); output.write((value >>> 8) & 0xFF); output.write(value & 0xFF);
         }
-
         private static int readInt(final ByteArrayInputStream input) throws IOException {
-            final int b1 = input.read();
-            final int b2 = input.read();
-            final int b3 = input.read();
-            final int b4 = input.read();
-            if ((b1 | b2 | b3 | b4) < 0) {
-                throw new IOException("Unexpected end of stream while reading int");
-            }
+            final int b1 = input.read(), b2 = input.read(), b3 = input.read(), b4 = input.read();
+            if ((b1 | b2 | b3 | b4) < 0) throw new IOException("Unexpected end of stream while reading int");
             return (b1 << 24) | (b2 << 16) | (b3 << 8) | b4;
         }
-
         private static void writeLong(final ByteArrayOutputStream output, final long value) throws IOException {
-            for (int shift = 56; shift >= 0; shift -= 8) {
-                output.write((int) ((value >>> shift) & 0xFF));
-            }
+            for (int shift = 56; shift >= 0; shift -= 8) output.write((int) ((value >>> shift) & 0xFF));
         }
-
         private static long readLong(final ByteArrayInputStream input) throws IOException {
-            long value = 0L;
-            for (int shift = 56; shift >= 0; shift -= 8) {
-                final int current = input.read();
-                if (current < 0) {
-                    throw new IOException("Unexpected end of stream while reading long");
-                }
-                value |= ((long) current) << shift;
-            }
-            return value;
+            long value = 0L; for (int shift = 56; shift >= 0; shift -= 8) { final int current = input.read(); if (current < 0) throw new IOException("Unexpected end of stream while reading long"); value |= ((long) current) << shift; } return value;
         }
-
         private static byte[] readFixedBytes(final ByteArrayInputStream input, final int length) throws IOException {
-            final byte[] bytes = input.readNBytes(length);
-            if (bytes.length != length) {
-                throw new IOException("Unexpected end of stream while reading bytes");
-            }
-            return bytes;
+            final byte[] bytes = input.readNBytes(length); if (bytes.length != length) throw new IOException("Unexpected end of stream while reading bytes"); return bytes;
         }
     }
 }
