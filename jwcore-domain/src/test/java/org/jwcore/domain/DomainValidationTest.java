@@ -89,8 +89,30 @@ class DomainValidationTest {
 
     @Test
     void shouldExposeEventTypeValues() {
-        assertEquals(EventType.MarketDataEvent, EventType.valueOf("MarketDataEvent"));
-        assertEquals(12, EventType.values().length);
+        // 1. Wszystkie wymagane wartości muszą istnieć
+        java.util.Set<String> required = java.util.Set.of(
+            "OrderIntentEvent", "OrderRejectedEvent", "OrderTimeoutEvent",
+            "MarketDataEvent", "RiskDecisionEvent", "MarginUpdateEvent",
+            "StateRebuiltEvent", "OrderFilledEvent", "OrderCanceledEvent",
+            "OrderUnknownEvent", "ExecutionEvent", "ParameterUpdatedEvent",
+            "EventProcessingFailedEvent"
+        );
+        java.util.Set<String> actual = java.util.Arrays.stream(EventType.values())
+            .map(Enum::name)
+            .collect(java.util.stream.Collectors.toSet());
+        assertTrue(actual.containsAll(required),
+            "Brakujące wartości EventType: " + required.stream()
+                .filter(r -> !actual.contains(r))
+                .collect(java.util.stream.Collectors.joining(", ")));
+
+        // 2. Brak duplikatów nazw
+        assertEquals(EventType.values().length, actual.size(),
+            "EventType zawiera zduplikowane nazwy");
+
+        // 3. Brak null w values()
+        for (EventType et : EventType.values()) {
+            assertNotNull(et, "EventType.values() zawiera null");
+        }
     }
 
     @Test
