@@ -7,6 +7,7 @@ import org.jwcore.domain.EventEnvelope;
 import org.jwcore.domain.EventType;
 import org.jwcore.domain.IdempotencyKeys;
 import org.jwcore.domain.RejectReason;
+import org.jwcore.domain.events.EventProcessingFailedEvent;
 import org.jwcore.domain.events.OrderRejectedEvent;
 import org.jwcore.execution.common.events.*;
 import org.jwcore.execution.common.runtime.PendingIntent;
@@ -21,6 +22,7 @@ import java.util.UUID;
 
 public final class EventEmitter {
     private static final byte PAYLOAD_VERSION = 2;
+    private static final int ERROR_MESSAGE_MAX_LENGTH = 512;
 
     private final IEventJournal eventJournal;
     private final ITimeProvider timeProvider;
@@ -129,6 +131,43 @@ public final class EventEmitter {
         );
         emit(envelope);
         return new OrderRejectedEvent(intent.intentId().toString(), reason, now, envelope);
+    }
+
+    public EventProcessingFailedEvent emitEventProcessingFailed(final UUID failedEventId, final Throwable exception) {
+        Objects.requireNonNull(failedEventId, "failedEventId cannot be null");
+        Objects.requireNonNull(exception, "exception cannot be null");
+        final Instant now = timeProvider.eventTime();
+        final String errorType = exception.getClass().getName();
+        final String errorMessage = truncateErrorMessage(Objects.toString(exception.getMessage(), ""));
+        final byte[] payload = String.join("|",
+                        failedEventId.toString(),
+                        errorType,
+                        errorMessage,
+                        now.toString())
+                .getBytes(StandardCharsets.UTF_8);
+        final EventEnvelope envelope = new EventEnvelope(
+                UUID.randomUUID(),
+                EventType.EventProcessingFailedEvent,
+                null,
+                failedEventId.toString(),
+                null,
+                IdempotencyKeys.generate(null, EventType.EventProcessingFailedEvent, payload),
+                timeProvider.monotonicTime(),
+                now,
+                PAYLOAD_VERSION,
+                payload,
+                sourceProcessId,
+                null
+        );
+        emit(envelope);
+        return new EventProcessingFailedEvent(failedEventId, errorType, errorMessage, now, envelope);
+    }
+
+    private static String truncateErrorMessage(final String message) {
+        if (message.length() <= ERROR_MESSAGE_MAX_LENGTH) {
+            return message;
+        }
+        return message.substring(0, ERROR_MESSAGE_MAX_LENGTH);
     }
 
     public StateRebuiltEvent createStateRebuiltEvent(final String accountId, final int snapshotVersion, final UUID rebuiltUntilEventId,

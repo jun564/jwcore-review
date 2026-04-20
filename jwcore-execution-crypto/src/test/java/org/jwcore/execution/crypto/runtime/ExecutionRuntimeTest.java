@@ -215,8 +215,69 @@ class ExecutionRuntimeTest {
         assertEquals(2, runtime.processedEvents());
     }
 
+    @Test
+    void shouldContinueTickCycleAfterBadEvent() {
+        final var journal = new InMemoryEventJournal();
+        final var time = new ControllableTimeProvider(1L, Instant.parse("2026-04-19T08:00:00Z"));
+        final var brokerSession = new StubBrokerSession();
+        final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.RUN, 5, 100, 100_000);
+
+        final EventEnvelope okFirst = orderIntentEvent(time, UUID.randomUUID(), "BTCUSDT|0.10", "S07:I03:VA07-03:BA01");
+        final EventEnvelope bad = orderIntentEvent(time, UUID.randomUUID(), "BROKEN_PAYLOAD", "S07:I04:VA07-04:BA01");
+        final EventEnvelope okThird = orderIntentEvent(time, UUID.randomUUID(), "ETHUSD|0.20", "S07:I05:VA07-05:BA01");
+        journal.append(okFirst);
+        journal.append(bad);
+        journal.append(okThird);
+
+        runtime.tickCycle();
+
+        assertEquals(2, brokerSession.submitted().size());
+        final var failedEvents = journal.all().stream()
+                .filter(e -> e.eventType() == EventType.EventProcessingFailedEvent)
+                .toList();
+        assertEquals(1, failedEvents.size());
+        assertEquals(bad.eventId(), extractFailedEventId(failedEvents.get(0)));
+
+        time.advanceBy(Duration.ofSeconds(5));
+        runtime.tickCycle();
+        assertEquals(2, journal.all().stream().filter(e -> e.eventType() == EventType.OrderTimeoutEvent).count());
+    }
+
+    @Test
+    void shouldEmitFailedEventForBrokenUuid() {
+        final var journal = new InMemoryEventJournal();
+        final var time = new ControllableTimeProvider(1L, Instant.parse("2026-04-19T08:00:00Z"));
+        final var brokerSession = new StubBrokerSession();
+        final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.RUN, 5, 100, 100_000);
+
+        final EventEnvelope malformedUuidEvent = orderIntentEventWithLocalIntentId(
+                time,
+                "broken-uuid",
+                "BTCUSDT|0.10",
+                "S07:I03:VA07-03:BA01"
+        );
+        journal.append(malformedUuidEvent);
+
+        runtime.tickCycle();
+
+        final var failedEvents = journal.all().stream()
+                .filter(e -> e.eventType() == EventType.EventProcessingFailedEvent)
+                .toList();
+        assertEquals(1, failedEvents.size());
+        assertEquals("java.lang.IllegalArgumentException", extractFailedErrorType(failedEvents.get(0)));
+    }
+
     private static String extractRejectReasonCode(final EventEnvelope envelope) {
         return new String(envelope.payload(), StandardCharsets.UTF_8).split("\\|", 3)[1];
+    }
+
+    private static UUID extractFailedEventId(final EventEnvelope envelope) {
+        final String[] parts = new String(envelope.payload(), StandardCharsets.UTF_8).split("\\|", 4);
+        return UUID.fromString(parts[0]);
+    }
+
+    private static String extractFailedErrorType(final EventEnvelope envelope) {
+        return new String(envelope.payload(), StandardCharsets.UTF_8).split("\\|", 4)[1];
     }
 
     private static ExecutionRuntime runtime(final InMemoryEventJournal journal,
@@ -239,12 +300,25 @@ class ExecutionRuntimeTest {
                                                   final UUID intentId,
                                                   final String payloadText,
                                                   final String canonicalId) {
+        return orderIntentEventWithLocalIntentId(time, intentId.toString(), payloadText, canonicalId);
+    }
+
+    private static EventEnvelope orderIntentEventWithLocalIntentId(final ControllableTimeProvider time,
+                                                                   final String localIntentId,
+                                                                   final String payloadText,
+                                                                   final String canonicalId) {
         final byte[] payload = payloadText.getBytes(StandardCharsets.UTF_8);
+        UUID correlationId = null;
+        try {
+            correlationId = UUID.fromString(localIntentId);
+        } catch (final IllegalArgumentException ignored) {
+            // intentionally ignored for malformed UUID scenarios
+        }
         return new EventEnvelope(
                 UUID.randomUUID(),
                 EventType.OrderIntentEvent,
                 null,
-                intentId.toString(),
+                localIntentId,
                 CanonicalId.parse(canonicalId),
                 IdempotencyKeys.generate(null, EventType.OrderIntentEvent, payload),
                 time.monotonicTime(),
@@ -252,7 +326,7 @@ class ExecutionRuntimeTest {
                 (byte) 1,
                 payload,
                 "crypto-runtime-test",
-                intentId
+                correlationId
         );
     }
 }
