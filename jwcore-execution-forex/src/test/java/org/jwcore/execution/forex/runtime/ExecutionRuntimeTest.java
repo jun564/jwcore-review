@@ -20,17 +20,65 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ExecutionRuntimeTest {
     @Test
+    void shouldEmitOrderSubmittedAfterBrokerSubmit() {
+        final var journal = new InMemoryEventJournal();
+        final var time = new ControllableTimeProvider(1L, Instant.parse("2026-04-19T08:00:00Z"));
+        final var brokerSession = new StubBrokerSession();
+        final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.RUN, 5, 30, 10, 100_000);
+
+        final UUID intentId = UUID.randomUUID();
+        journal.append(orderIntentEvent(time, intentId, "forex-account|BTCUSDT|0.10", "S07:I03:VA07-03:BA01"));
+
+        runtime.tickCycle();
+
+        final var submittedEvents = journal.all().stream()
+                .filter(e -> e.eventType() == EventType.OrderSubmittedEvent)
+                .toList();
+        assertEquals(1, submittedEvents.size());
+        final EventEnvelope submitted = submittedEvents.get(0);
+        assertEquals(intentId, submitted.correlationId());
+        assertEquals("forex-execution-node-test", submitted.sourceProcessId());
+        final String[] payload = new String(submitted.payload(), StandardCharsets.UTF_8).split("\\|", 6);
+        assertEquals("forex-account", payload[0]);
+        assertEquals(intentId.toString(), payload[1]);
+        assertEquals(submitted.brokerOrderId(), payload[2]);
+        assertEquals("0.1", payload[4]);
+    }
+
+
+    @Test
+    void shouldEmitBrokerTimeoutAsOrderUnknownAfterSubmit() {
+        final var journal = new InMemoryEventJournal();
+        final var time = new ControllableTimeProvider(1L, Instant.parse("2026-04-19T08:00:00Z"));
+        final var brokerSession = new StubBrokerSession();
+        final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.RUN, 5, 6, 10, 100_000);
+
+        journal.append(orderIntentEvent(time, UUID.randomUUID(), "forex-account|BTCUSDT|0.10", "S07:I03:VA07-03:BA01"));
+        runtime.tickCycle();
+
+        time.advanceBy(Duration.ofSeconds(7));
+        runtime.tickCycle();
+
+        final var unknownEvents = journal.all().stream()
+                .filter(e -> e.eventType() == EventType.OrderUnknownEvent)
+                .toList();
+        assertEquals(1, unknownEvents.size());
+        assertEquals("BROKER_TIMEOUT", new String(unknownEvents.get(0).payload(), StandardCharsets.UTF_8).split("\\|", 3)[1]);
+    }
+
+    @Test
     void shouldProcessOrderIntentInRunStateAndEmitTimeoutAndMargin() {
         final var journal = new InMemoryEventJournal();
         final var time = new ControllableTimeProvider(1L, Instant.parse("2026-04-19T08:00:00Z"));
         final var brokerSession = new StubBrokerSession();
-        final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.RUN, 5, 2, 100_000);
+        final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.RUN, 5, 30, 2, 100_000);
 
         journal.append(orderIntentEvent(time, UUID.randomUUID(), "forex-account|BTCUSDT|0.10", "S07:I03:VA07-03:BA01"));
 
         runtime.tickCycle();
         assertEquals(1, brokerSession.submitted().size());
-        assertEquals(1, runtime.pendingIntents());
+        assertEquals(1, journal.all().stream().filter(e -> e.eventType() == EventType.OrderSubmittedEvent).count());
+        assertEquals(1, brokerSession.brokerOrderIds().size());
 
         time.advanceBy(Duration.ofSeconds(5));
         runtime.tickCycle();
@@ -43,7 +91,7 @@ class ExecutionRuntimeTest {
         final var journal = new InMemoryEventJournal();
         final var time = new ControllableTimeProvider(1L, Instant.parse("2026-04-19T08:00:00Z"));
         final var brokerSession = new StubBrokerSession();
-        final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.RUN, 5, 5, 100_000);
+        final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.RUN, 5, 30, 5, 100_000);
         final EventEmitter emitter = new EventEmitter(journal, time);
         journal.append(emitter.createRiskDecisionEvent("forex", ExecutionState.SAFE, "test-safe").envelope());
 
@@ -56,7 +104,7 @@ class ExecutionRuntimeTest {
         final var journal = new InMemoryEventJournal();
         final var time = new ControllableTimeProvider(1L, Instant.parse("2026-04-19T08:00:00Z"));
         final var brokerSession = new StubBrokerSession();
-        final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.RUN, 5, 5, 100_000);
+        final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.RUN, 5, 30, 5, 100_000);
         final EventEmitter emitter = new EventEmitter(journal, time);
         journal.append(emitter.createRiskDecisionEvent("crypto", ExecutionState.HALT, "test-halt").envelope());
 
@@ -69,7 +117,7 @@ class ExecutionRuntimeTest {
         final var journal = new InMemoryEventJournal();
         final var time = new ControllableTimeProvider(1L, Instant.parse("2026-04-19T08:00:00Z"));
         final var brokerSession = new StubBrokerSession();
-        final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.SAFE, 5, 10, 100_000);
+        final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.SAFE, 5, 30, 10, 100_000);
 
         final UUID rejectedIntentId = UUID.randomUUID();
         journal.append(orderIntentEvent(time, rejectedIntentId, "forex-account|BTCUSDT|0.10", "S07:I03:VA07-03:BA01"));
@@ -90,7 +138,7 @@ class ExecutionRuntimeTest {
 
         final UUID pendingIntent = UUID.randomUUID();
         journal.append(orderIntentEvent(time, pendingIntent, "forex-account|ETHUSD|0.20", "S07:I04:VA07-04:BA01"));
-        final var runRuntime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.RUN, 5, 10, 100_000);
+        final var runRuntime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.RUN, 5, 30, 10, 100_000);
         runRuntime.tickCycle();
         assertEquals(1, runRuntime.pendingIntents());
 
@@ -104,7 +152,7 @@ class ExecutionRuntimeTest {
         final var journal = new InMemoryEventJournal();
         final var time = new ControllableTimeProvider(1L, Instant.parse("2026-04-19T08:00:00Z"));
         final var brokerSession = new StubBrokerSession();
-        final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.HALT, 5, 10, 100_000);
+        final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.HALT, 5, 30, 10, 100_000);
 
         final UUID rejectedIntentId = UUID.randomUUID();
         journal.append(orderIntentEvent(time, rejectedIntentId, "forex-account|BTCUSDT|0.10", "S07:I03:VA07-03:BA01"));
@@ -125,7 +173,7 @@ class ExecutionRuntimeTest {
 
         final UUID pendingIntent = UUID.randomUUID();
         journal.append(orderIntentEvent(time, pendingIntent, "forex-account|ETHUSD|0.20", "S07:I04:VA07-04:BA01"));
-        final var runRuntime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.RUN, 5, 10, 100_000);
+        final var runRuntime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.RUN, 5, 30, 10, 100_000);
         runRuntime.tickCycle();
         assertEquals(1, runRuntime.pendingIntents());
 
@@ -143,7 +191,7 @@ class ExecutionRuntimeTest {
         journal.append(emitter.createRiskDecisionEvent("forex", ExecutionState.KILL, "operator kill").envelope());
         journal.append(orderIntentEvent(time, UUID.randomUUID(), "forex-account|BTCUSDT|0.10", "S07:I03:VA07-03:BA01"));
 
-        final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.RUN, 5, 10, 100_000);
+        final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.RUN, 5, 30, 10, 100_000);
         runtime.tickCycle();
 
         assertEquals(ExecutionState.KILL, runtime.currentState());
@@ -155,7 +203,7 @@ class ExecutionRuntimeTest {
         final var journal = new InMemoryEventJournal();
         final var time = new ControllableTimeProvider(1L, Instant.parse("2026-04-19T08:00:00Z"));
         final var brokerSession = new StubBrokerSession();
-        final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.RUN, 5, 10, 100_000);
+        final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.RUN, 5, 30, 10, 100_000);
         final EventEmitter emitter = new EventEmitter(journal, time);
 
         journal.append(emitter.createRiskDecisionEvent("forex", ExecutionState.HALT, "halt").envelope());
@@ -178,7 +226,7 @@ class ExecutionRuntimeTest {
         final var journal = new InMemoryEventJournal();
         final var time = new ControllableTimeProvider(1L, Instant.parse("2026-04-19T08:00:00Z"));
         final var brokerSession = new StubBrokerSession();
-        final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.RUN, 5, 3, 100_000);
+        final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.RUN, 5, 30, 3, 100_000);
 
         runtime.tickCycle();
         assertTrue(journal.all().stream().noneMatch(e -> e.eventType() == EventType.MarginUpdateEvent));
@@ -195,7 +243,7 @@ class ExecutionRuntimeTest {
         final var journal = new InMemoryEventJournal();
         final var time = new ControllableTimeProvider(1L, Instant.parse("2026-04-19T08:00:00Z"));
         final var brokerSession = new StubBrokerSession();
-        final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.RUN, 5, 10, 100_000);
+        final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.RUN, 5, 30, 10, 100_000);
 
         journal.append(orderIntentEvent(time, UUID.randomUUID(), "forex-account|BTCUSDT|0.10", "S07:I03:VA07-03:BA01"));
         journal.append(orderIntentEvent(time, UUID.randomUUID(), "forex-account|ETHUSD|0.20", "S07:I04:VA07-04:BA01"));
@@ -205,7 +253,7 @@ class ExecutionRuntimeTest {
         time.advanceBy(Duration.ofSeconds(5));
         runtime.tickCycle();
 
-        assertEquals(3, journal.all().stream().filter(e -> e.eventType() == EventType.OrderTimeoutEvent).count());
+        assertEquals(0, journal.all().stream().filter(e -> e.eventType() == EventType.OrderTimeoutEvent).count());
         assertEquals(0, runtime.pendingIntents());
     }
 
@@ -214,7 +262,7 @@ class ExecutionRuntimeTest {
         final var journal = new InMemoryEventJournal();
         final var time = new ControllableTimeProvider(1L, Instant.parse("2026-04-19T08:00:00Z"));
         final var brokerSession = new StubBrokerSession();
-        final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.RUN, 5, 100, 2);
+        final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.RUN, 5, 30, 100, 2);
 
         journal.append(orderIntentEvent(time, UUID.randomUUID(), "forex-account|BTCUSDT|0.10", "S07:I03:VA07-03:BA01"));
         runtime.tickCycle();
@@ -233,7 +281,7 @@ class ExecutionRuntimeTest {
         final var journal = new InMemoryEventJournal();
         final var time = new ControllableTimeProvider(1L, Instant.parse("2026-04-19T08:00:00Z"));
         final var brokerSession = new StubBrokerSession();
-        final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.RUN, 5, 100, 100_000);
+        final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.RUN, 5, 30, 100, 100_000);
 
         final EventEnvelope okFirst = orderIntentEvent(time, UUID.randomUUID(), "forex-account|BTCUSDT|0.10", "S07:I03:VA07-03:BA01");
         final EventEnvelope bad = orderIntentEvent(time, UUID.randomUUID(), "BROKEN_PAYLOAD", "S07:I04:VA07-04:BA01");
@@ -253,7 +301,7 @@ class ExecutionRuntimeTest {
 
         time.advanceBy(Duration.ofSeconds(5));
         runtime.tickCycle();
-        assertEquals(2, journal.all().stream().filter(e -> e.eventType() == EventType.OrderTimeoutEvent).count());
+        assertEquals(0, journal.all().stream().filter(e -> e.eventType() == EventType.OrderTimeoutEvent).count());
     }
 
     @Test
@@ -261,7 +309,7 @@ class ExecutionRuntimeTest {
         final var journal = new InMemoryEventJournal();
         final var time = new ControllableTimeProvider(1L, Instant.parse("2026-04-19T08:00:00Z"));
         final var brokerSession = new StubBrokerSession();
-        final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.RUN, 5, 100, 100_000);
+        final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.RUN, 5, 30, 100, 100_000);
 
         final EventEnvelope malformedUuidEvent = orderIntentEventWithLocalIntentId(
                 time,
@@ -297,11 +345,12 @@ class ExecutionRuntimeTest {
                                             final ControllableTimeProvider time,
                                             final StubBrokerSession brokerSession,
                                             final org.jwcore.execution.forex.risk.LocalRiskPolicy policy,
-                                            final long timeoutSeconds,
+                                            final long executionTimeoutSeconds,
+                                            final long brokerTimeoutSeconds,
                                             final int marginEveryCycles,
                                             final int processedCapacity) {
         return new ExecutionRuntime(
-                new ExecutionRuntimeConfig("forex", Duration.ofSeconds(timeoutSeconds), marginEveryCycles, 100L, processedCapacity, "forex-execution-node-test"),
+                new ExecutionRuntimeConfig("forex", Duration.ofSeconds(executionTimeoutSeconds), Duration.ofSeconds(brokerTimeoutSeconds), marginEveryCycles, 100L, processedCapacity, "forex-execution-node-test"),
                 journal,
                 time,
                 brokerSession,

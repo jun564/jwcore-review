@@ -75,7 +75,7 @@ public final class ExecutionRuntime {
         intentRegistry.absorb(freshEvents);
         processOrderIntents(freshEvents);
 
-        intentRegistry.checkTimeouts();
+        intentRegistry.checkTimeouts(config.brokerTimeout().toMillis());
 
         cycleCounter++;
         if (cycleCounter % config.marginEmitEveryNCycles() == 0) {
@@ -118,8 +118,16 @@ public final class ExecutionRuntime {
                 }
                 final OrderIntent orderIntent = parseOrderIntent(envelope);
                 if (currentState == ExecutionState.RUN) {
-                    brokerSession.submit(orderIntent);
-                    intentRegistry.bind(intentId, orderIntent.canonicalId(), config.accountId(), envelope.timestampEvent(), config.orderTimeout().toMillis());
+                    final String brokerOrderId = brokerSession.submit(orderIntent);
+                    final PendingIntent pendingIntent = new PendingIntent(
+                            intentId,
+                            orderIntent.canonicalId(),
+                            config.accountId(),
+                            envelope.timestampEvent(),
+                            config.executionTimeout().toMillis()
+                    );
+                    eventEmitter.emitOrderSubmitted(pendingIntent, brokerOrderId, orderIntent.volume());
+                    intentRegistry.bind(intentId, orderIntent.canonicalId(), config.accountId(), envelope.timestampEvent(), config.executionTimeout().toMillis());
                     continue;
                 }
                 if (currentState == ExecutionState.SAFE) {
@@ -145,7 +153,7 @@ public final class ExecutionRuntime {
                 orderIntent.canonicalId(),
                 config.accountId(),
                 envelope.timestampEvent(),
-                config.orderTimeout().toMillis()
+                config.executionTimeout().toMillis()
         );
         eventEmitter.emitOrderRejected(pendingIntent, reason);
     }

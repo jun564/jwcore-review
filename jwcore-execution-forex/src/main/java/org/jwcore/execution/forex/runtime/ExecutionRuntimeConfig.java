@@ -5,7 +5,8 @@ import java.util.Objects;
 
 public record ExecutionRuntimeConfig(
         String accountId,
-        Duration orderTimeout,
+        Duration executionTimeout,
+        Duration brokerTimeout,
         int marginEmitEveryNCycles,
         long tickIntervalMs,
         int processedEventsCapacity,
@@ -13,9 +14,16 @@ public record ExecutionRuntimeConfig(
 
     public ExecutionRuntimeConfig {
         Objects.requireNonNull(accountId, "accountId cannot be null");
-        Objects.requireNonNull(orderTimeout, "orderTimeout cannot be null");
-        if (orderTimeout.isZero() || orderTimeout.isNegative()) {
-            throw new IllegalArgumentException("orderTimeout must be positive");
+        Objects.requireNonNull(executionTimeout, "executionTimeout cannot be null");
+        Objects.requireNonNull(brokerTimeout, "brokerTimeout cannot be null");
+        if (executionTimeout.isZero() || executionTimeout.isNegative()) {
+            throw new IllegalArgumentException("executionTimeout must be positive");
+        }
+        if (brokerTimeout.isZero() || brokerTimeout.isNegative()) {
+            throw new IllegalArgumentException("brokerTimeout must be positive");
+        }
+        if (brokerTimeout.minus(executionTimeout).isNegative()) {
+            throw new IllegalArgumentException("brokerTimeout must be greater or equal to executionTimeout");
         }
         if (marginEmitEveryNCycles <= 0) {
             throw new IllegalArgumentException("marginEmitEveryNCycles must be positive");

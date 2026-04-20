@@ -6,7 +6,7 @@ import java.math.BigDecimal;
 
 public interface BrokerSession {
     boolean isConnected();
-    void submit(OrderIntent orderIntent);
+    String submit(OrderIntent orderIntent);
     BigDecimal currentMarginLevel();
     BigDecimal currentFreeMargin();
     BigDecimal currentEquity();

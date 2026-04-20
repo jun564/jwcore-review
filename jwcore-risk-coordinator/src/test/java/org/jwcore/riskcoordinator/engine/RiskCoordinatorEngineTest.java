@@ -21,7 +21,8 @@ class RiskCoordinatorEngineTest {
     void shouldReturnRunWhenExposureBelowSafeThreshold() {
         final var engine = new RiskCoordinatorEngine(new BigDecimal("100"), new BigDecimal("150"));
 
-        final var result = engine.evaluate(List.of(orderIntentEvent("crypto-account|BTCUSDT|99")));
+        final var result = engine.evaluate(List.of(orderSubmittedEvent("crypto-account|"
+                + UUID.randomUUID() + "|BROKER-1|S07:I03:VA07-03:BA01|99|2026-04-20T10:00:00Z")));
 
         assertEquals(ExecutionState.RUN, result.get("crypto-account"));
     }
@@ -30,7 +31,8 @@ class RiskCoordinatorEngineTest {
     void shouldReturnSafeWhenExposureBetweenThresholds() {
         final var engine = new RiskCoordinatorEngine(new BigDecimal("100"), new BigDecimal("150"));
 
-        final var result = engine.evaluate(List.of(orderIntentEvent("crypto-account|BTCUSDT|120")));
+        final var result = engine.evaluate(List.of(orderSubmittedEvent(
+                "crypto-account|" + UUID.randomUUID() + "|BROKER-1|S07:I03:VA07-03:BA01|120|2026-04-20T10:00:00Z")));
 
         assertEquals(ExecutionState.SAFE, result.get("crypto-account"));
     }
@@ -39,7 +41,8 @@ class RiskCoordinatorEngineTest {
     void shouldReturnHaltWhenExposureAboveHaltThreshold() {
         final var engine = new RiskCoordinatorEngine(new BigDecimal("100"), new BigDecimal("150"));
 
-        final var result = engine.evaluate(List.of(orderIntentEvent("crypto-account|BTCUSDT|150")));
+        final var result = engine.evaluate(List.of(orderSubmittedEvent(
+                "crypto-account|" + UUID.randomUUID() + "|BROKER-1|S07:I03:VA07-03:BA01|151|2026-04-20T10:00:00Z")));
 
         assertEquals(ExecutionState.HALT, result.get("crypto-account"));
     }
@@ -49,9 +52,9 @@ class RiskCoordinatorEngineTest {
         final var engine = new RiskCoordinatorEngine(new BigDecimal("100"), new BigDecimal("150"));
 
         final var result = engine.evaluate(List.of(
-                orderIntentEvent("crypto-account|BTCUSDT|80"),
-                orderIntentEvent("crypto-account|ETHUSD|30"),
-                orderIntentEvent("forex-account|EURUSD|170")
+                orderSubmittedEvent("crypto-account|" + UUID.randomUUID() + "|BROKER-1|S07:I03:VA07-03:BA01|80|2026-04-20T10:00:00Z"),
+                orderSubmittedEvent("crypto-account|" + UUID.randomUUID() + "|BROKER-2|S07:I04:VA07-04:BA01|30|2026-04-20T10:00:01Z"),
+                orderSubmittedEvent("forex-account|" + UUID.randomUUID() + "|BROKER-3|S07:I05:VA07-05:BA01|170|2026-04-20T10:00:02Z")
         ));
 
         assertEquals(ExecutionState.SAFE, result.get("crypto-account"));
@@ -62,22 +65,36 @@ class RiskCoordinatorEngineTest {
     void shouldSkipEventWhenAccountIdMissing() {
         final var engine = new RiskCoordinatorEngine(new BigDecimal("100"), new BigDecimal("150"));
 
-        final var result = engine.evaluate(List.of(orderIntentEvent("|BTCUSDT|130")));
+        final var result = engine.evaluate(List.of(orderSubmittedEvent("|"
+                + UUID.randomUUID() + "|BROKER-1|S07:I03:VA07-03:BA01|130|2026-04-20T10:00:00Z")));
 
         assertFalse(result.containsKey(""));
         assertEquals(0, result.size());
     }
 
-    private static EventEnvelope orderIntentEvent(final String payloadText) {
+    @Test
+    void shouldAggregateExposureAsSize() {
+        final var engine = new RiskCoordinatorEngine(new BigDecimal("100"), new BigDecimal("150"));
+
+        final var result = engine.evaluate(List.of(
+                orderSubmittedEvent("crypto-account|" + UUID.randomUUID() + "|BROKER-1|S07:I03:VA07-03:BA01|40.5|2026-04-20T10:00:00Z"),
+                orderSubmittedEvent("crypto-account|" + UUID.randomUUID() + "|BROKER-2|S07:I04:VA07-04:BA01|59.5|2026-04-20T10:00:01Z"),
+                orderSubmittedEvent("crypto-account|" + UUID.randomUUID() + "|BROKER-3|S07:I05:VA07-05:BA01|10|2026-04-20T10:00:02Z")
+        ));
+
+        assertEquals(ExecutionState.SAFE, result.get("crypto-account"));
+    }
+
+    private static EventEnvelope orderSubmittedEvent(final String payloadText) {
         final byte[] payload = payloadText.getBytes(StandardCharsets.UTF_8);
         final UUID intentId = UUID.randomUUID();
         return new EventEnvelope(
                 UUID.randomUUID(),
-                EventType.OrderIntentEvent,
+                EventType.OrderSubmittedEvent,
                 null,
                 intentId.toString(),
                 CanonicalId.parse("S07:I03:VA07-03:BA01"),
-                IdempotencyKeys.generate(null, EventType.OrderIntentEvent, payload),
+                IdempotencyKeys.generate(null, EventType.OrderSubmittedEvent, payload),
                 1L,
                 Instant.parse("2026-04-19T08:00:00Z"),
                 (byte) 1,
