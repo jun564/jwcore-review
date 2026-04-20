@@ -70,11 +70,12 @@ class RiskCoordinatorEngineTest {
 
     private static EventEnvelope orderIntentEvent(final String payloadText) {
         final byte[] payload = payloadText.getBytes(StandardCharsets.UTF_8);
+        final UUID intentId = UUID.randomUUID();
         return new EventEnvelope(
                 UUID.randomUUID(),
                 EventType.OrderIntentEvent,
                 null,
-                UUID.randomUUID().toString(),
+                intentId.toString(),
                 CanonicalId.parse("S07:I03:VA07-03:BA01"),
                 IdempotencyKeys.generate(null, EventType.OrderIntentEvent, payload),
                 1L,
@@ -82,7 +83,7 @@ class RiskCoordinatorEngineTest {
                 (byte) 1,
                 payload,
                 "risk-coordinator-test",
-                UUID.randomUUID()
+                intentId
         );
     }
 }
