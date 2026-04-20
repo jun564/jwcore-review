@@ -3,7 +3,10 @@ package org.jwcore.riskcoordinator.config;
 import java.math.BigDecimal;
 import java.util.Objects;
 
-public record RiskCoordinatorConfig(BigDecimal safeThreshold, BigDecimal haltThreshold, long tickIntervalMs) {
+public record RiskCoordinatorConfig(BigDecimal safeThreshold,
+                                    BigDecimal haltThreshold,
+                                    long tickIntervalMs,
+                                    int receivedCapacity) {
     public RiskCoordinatorConfig {
         Objects.requireNonNull(safeThreshold, "safeThreshold cannot be null");
         Objects.requireNonNull(haltThreshold, "haltThreshold cannot be null");
@@ -18,6 +21,9 @@ public record RiskCoordinatorConfig(BigDecimal safeThreshold, BigDecimal haltThr
         }
         if (tickIntervalMs <= 0L) {
             throw new IllegalArgumentException("tickIntervalMs must be positive");
+        }
+        if (receivedCapacity <= 0) {
+            throw new IllegalArgumentException("receivedCapacity must be positive");
         }
     }
 }

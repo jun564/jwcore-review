@@ -5,6 +5,7 @@ import org.jwcore.domain.EventType;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -16,7 +17,7 @@ class RiskCoordinatorTailerTest {
     void shouldStartReceiveEventsAndClose() {
         final var business = new InMemoryEventJournal();
         final var market = new InMemoryEventJournal();
-        final var tailer = new RiskCoordinatorTailer(business, market);
+        final var tailer = new RiskCoordinatorTailer(business, market, 100);
 
         tailer.start();
         assertTrue(tailer.started());
@@ -27,6 +28,32 @@ class RiskCoordinatorTailerTest {
         assertEquals(2, tailer.received().size());
         tailer.close();
         assertFalse(tailer.started());
+    }
+
+    @Test
+    void shouldBoundReceivedEnvelopes() {
+        final var business = new InMemoryEventJournal();
+        final var market = new InMemoryEventJournal();
+        final var tailer = new RiskCoordinatorTailer(business, market, 3);
+
+        tailer.start();
+        final EventEnvelope first = event(EventType.MarginUpdateEvent);
+        final EventEnvelope second = event(EventType.OrderTimeoutEvent);
+        final EventEnvelope third = event(EventType.MarginUpdateEvent);
+        final EventEnvelope fourth = event(EventType.OrderTimeoutEvent);
+        final EventEnvelope fifth = event(EventType.MarginUpdateEvent);
+
+        business.append(first);
+        business.append(second);
+        market.append(third);
+        market.append(fourth);
+        business.append(fifth);
+
+        final List<EventEnvelope> received = tailer.received();
+        assertEquals(3, received.size());
+        assertEquals(List.of(third, fourth, fifth), received);
+
+        tailer.close();
     }
 
     private static EventEnvelope event(final EventType eventType) {
