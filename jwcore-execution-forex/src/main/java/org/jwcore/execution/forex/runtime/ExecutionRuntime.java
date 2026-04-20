@@ -25,8 +25,12 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 public final class ExecutionRuntime {
+    private static final Logger LOGGER = Logger.getLogger(ExecutionRuntime.class.getName());
+
     private final ExecutionRuntimeConfig config;
     private final IEventJournal eventJournal;
     private final ITimeProvider timeProvider;
@@ -104,25 +108,31 @@ public final class ExecutionRuntime {
             if (envelope.eventType() != EventType.OrderIntentEvent) {
                 continue;
             }
-            final UUID intentId = UUID.fromString(Objects.requireNonNull(envelope.localIntentId(), "localIntentId cannot be null"));
-            if (intentRegistry.findCanonicalId(intentId).isPresent()) {
-                continue;
-            }
-            if (intentRegistry.isTerminated(envelope.correlationId())) {
-                continue;
-            }
-            final OrderIntent orderIntent = parseOrderIntent(envelope);
-            if (currentState == ExecutionState.RUN) {
-                brokerSession.submit(orderIntent);
-                intentRegistry.bind(intentId, orderIntent.canonicalId(), config.accountId(), envelope.timestampEvent(), config.orderTimeout().toMillis());
-                continue;
-            }
-            if (currentState == ExecutionState.SAFE) {
-                emitRejected(orderIntent, envelope, RejectReason.SAFE_STATE);
-                continue;
-            }
-            if (currentState == ExecutionState.HALT) {
-                emitRejected(orderIntent, envelope, RejectReason.HALT_STATE);
+            try {
+                final UUID intentId = UUID.fromString(Objects.requireNonNull(envelope.localIntentId(), "localIntentId cannot be null"));
+                if (intentRegistry.findCanonicalId(intentId).isPresent()) {
+                    continue;
+                }
+                if (intentRegistry.isTerminated(envelope.correlationId())) {
+                    continue;
+                }
+                final OrderIntent orderIntent = parseOrderIntent(envelope);
+                if (currentState == ExecutionState.RUN) {
+                    brokerSession.submit(orderIntent);
+                    intentRegistry.bind(intentId, orderIntent.canonicalId(), config.accountId(), envelope.timestampEvent(), config.orderTimeout().toMillis());
+                    continue;
+                }
+                if (currentState == ExecutionState.SAFE) {
+                    emitRejected(orderIntent, envelope, RejectReason.SAFE_STATE);
+                    continue;
+                }
+                if (currentState == ExecutionState.HALT) {
+                    emitRejected(orderIntent, envelope, RejectReason.HALT_STATE);
+                    continue;
+                }
+            } catch (final Exception exception) {
+                LOGGER.log(Level.SEVERE, "Nieudane przetworzenie eventu eventId=" + envelope.eventId(), exception);
+                eventEmitter.emitEventProcessingFailed(envelope.eventId(), exception);
                 continue;
             }
         }

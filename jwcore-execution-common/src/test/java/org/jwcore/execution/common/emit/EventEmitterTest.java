@@ -17,6 +17,8 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class EventEmitterTest {
     @Test
@@ -63,5 +65,32 @@ class EventEmitterTest {
         assertEquals(EventType.StateRebuiltEvent, journal.all().get(4).eventType());
         assertEquals(5, journal.all().size());
         assertNotNull(rebuilt.envelope().correlationId());
+    }
+
+    @Test
+    void shouldThrowWhenEmitEventProcessingFailedCalledWithNullException() {
+        final var journal = new org.jwcore.execution.common.registry.InMemoryEventJournal();
+        final var time = new ControllableTimeProvider(1L, Instant.parse("2026-04-19T08:00:00Z"));
+        final var emitter = new EventEmitter(journal, time, "exec-crypto-1");
+
+        assertThrows(NullPointerException.class, () -> emitter.emitEventProcessingFailed(UUID.randomUUID(), null));
+    }
+
+    @Test
+    void shouldTruncateLongErrorMessageForEventProcessingFailed() {
+        final var journal = new org.jwcore.execution.common.registry.InMemoryEventJournal();
+        final var time = new ControllableTimeProvider(1L, Instant.parse("2026-04-19T08:00:00Z"));
+        final var emitter = new EventEmitter(journal, time, "exec-crypto-1");
+        final String longMessage = "x".repeat(700);
+
+        final var failedEvent = emitter.emitEventProcessingFailed(
+                UUID.randomUUID(),
+                new IllegalStateException(longMessage)
+        );
+
+        assertEquals(512, failedEvent.errorMessage().length());
+        assertEquals(EventType.EventProcessingFailedEvent, failedEvent.envelope().eventType());
+        assertNull(failedEvent.envelope().correlationId());
+        assertEquals("exec-crypto-1", failedEvent.envelope().sourceProcessId());
     }
 }

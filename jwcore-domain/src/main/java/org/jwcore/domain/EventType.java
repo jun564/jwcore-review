@@ -12,5 +12,6 @@ public enum EventType {
     OrderFilledEvent,
     OrderRejectedEvent,
     OrderCanceledEvent,
-    OrderUnknownEvent
+    OrderUnknownEvent,
+    EventProcessingFailedEvent
 }
