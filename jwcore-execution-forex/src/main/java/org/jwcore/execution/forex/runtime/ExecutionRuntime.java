@@ -152,14 +152,17 @@ public final class ExecutionRuntime {
 
     private OrderIntent parseOrderIntent(final EventEnvelope envelope) {
         final String payloadText = new String(envelope.payload(), StandardCharsets.UTF_8);
-        final String[] parts = payloadText.split("\\|", 2);
-        if (parts.length != 2) {
+        final String[] parts = payloadText.split("\\|", 3);
+        if (parts.length != 3) {
             throw new IllegalArgumentException("Invalid OrderIntentEvent payload");
+        }
+        if (parts[0].isBlank()) {
+            throw new IllegalArgumentException("Invalid OrderIntentEvent payload: accountId cannot be blank");
         }
         return new OrderIntent(
                 Objects.requireNonNull(envelope.canonicalId(), "canonicalId cannot be null"),
-                new Instrument(parts[0]),
-                Double.parseDouble(parts[1])
+                new Instrument(parts[1]),
+                Double.parseDouble(parts[2])
         );
     }
 

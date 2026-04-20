@@ -16,7 +16,11 @@ public final class RiskCoordinatorPropertiesLoader {
         final BigDecimal haltThreshold = parsePositiveDecimal(properties, "halt.threshold", "150000");
         final long tickIntervalMs = parsePositiveLong(properties, "tick.interval.ms", 100L);
         final int receivedCapacity = parsePositiveInt(properties, "risk.coordinator.received.capacity", 10000);
-        return new RiskCoordinatorConfig(safeThreshold, haltThreshold, tickIntervalMs, receivedCapacity);
+        final String nodeId = Objects.requireNonNull(properties.getProperty("nodeId"), "nodeId cannot be null");
+        if (nodeId.isBlank()) {
+            throw new IllegalArgumentException("nodeId cannot be blank");
+        }
+        return new RiskCoordinatorConfig(safeThreshold, haltThreshold, tickIntervalMs, receivedCapacity, nodeId);
     }
 
     private static BigDecimal parsePositiveDecimal(final Properties properties, final String key, final String defaultValue) {

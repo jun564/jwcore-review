@@ -77,7 +77,7 @@ class IntentRegistryTest {
         final var rejected = emitter.emitOrderRejected(terminatedPending, RejectReason.SAFE_STATE).envelope();
 
         final UUID nonTerminalCorrelationId = UUID.randomUUID();
-        final byte[] payload = "BTCUSDT|0.10".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        final byte[] payload = "crypto-account|BTCUSDT|0.10".getBytes(java.nio.charset.StandardCharsets.UTF_8);
         final var orderIntent = emitter.createEnvelope(
                 EventType.OrderIntentEvent,
                 null,

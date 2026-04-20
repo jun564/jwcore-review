@@ -6,10 +6,12 @@ import java.util.Objects;
 public record RiskCoordinatorConfig(BigDecimal safeThreshold,
                                     BigDecimal haltThreshold,
                                     long tickIntervalMs,
-                                    int receivedCapacity) {
+                                    int receivedCapacity,
+                                    String nodeId) {
     public RiskCoordinatorConfig {
         Objects.requireNonNull(safeThreshold, "safeThreshold cannot be null");
         Objects.requireNonNull(haltThreshold, "haltThreshold cannot be null");
+        Objects.requireNonNull(nodeId, "nodeId cannot be null");
         if (safeThreshold.signum() <= 0) {
             throw new IllegalArgumentException("safeThreshold must be positive");
         }
@@ -24,6 +26,9 @@ public record RiskCoordinatorConfig(BigDecimal safeThreshold,
         }
         if (receivedCapacity <= 0) {
             throw new IllegalArgumentException("receivedCapacity must be positive");
+        }
+        if (nodeId.isBlank()) {
+            throw new IllegalArgumentException("nodeId cannot be blank");
         }
     }
 }
