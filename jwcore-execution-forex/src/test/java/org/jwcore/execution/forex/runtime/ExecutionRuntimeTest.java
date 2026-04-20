@@ -26,7 +26,7 @@ class ExecutionRuntimeTest {
         final var brokerSession = new StubBrokerSession();
         final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.RUN, 5, 2, 100_000);
 
-        journal.append(orderIntentEvent(time, UUID.randomUUID(), "BTCUSDT|0.10", "S07:I03:VA07-03:BA01"));
+        journal.append(orderIntentEvent(time, UUID.randomUUID(), "forex-account|BTCUSDT|0.10", "S07:I03:VA07-03:BA01"));
 
         runtime.tickCycle();
         assertEquals(1, brokerSession.submitted().size());
@@ -39,16 +39,29 @@ class ExecutionRuntimeTest {
     }
 
     @Test
-    void shouldHonorMoreRestrictiveGlobalRiskDecision() {
+    void shouldTransitionToSafeOnRiskDecisionForOwnAccount() {
         final var journal = new InMemoryEventJournal();
         final var time = new ControllableTimeProvider(1L, Instant.parse("2026-04-19T08:00:00Z"));
         final var brokerSession = new StubBrokerSession();
         final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.RUN, 5, 5, 100_000);
         final EventEmitter emitter = new EventEmitter(journal, time);
-        journal.append(emitter.createRiskDecisionEvent("forex", ExecutionState.HALT, "test-halt").envelope());
+        journal.append(emitter.createRiskDecisionEvent("forex", ExecutionState.SAFE, "test-safe").envelope());
 
         runtime.tickCycle();
-        assertEquals(ExecutionState.HALT, runtime.currentState());
+        assertEquals(ExecutionState.SAFE, runtime.currentState());
+    }
+
+    @Test
+    void shouldIgnoreRiskDecisionForOtherAccount() {
+        final var journal = new InMemoryEventJournal();
+        final var time = new ControllableTimeProvider(1L, Instant.parse("2026-04-19T08:00:00Z"));
+        final var brokerSession = new StubBrokerSession();
+        final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.RUN, 5, 5, 100_000);
+        final EventEmitter emitter = new EventEmitter(journal, time);
+        journal.append(emitter.createRiskDecisionEvent("crypto", ExecutionState.HALT, "test-halt").envelope());
+
+        runtime.tickCycle();
+        assertEquals(ExecutionState.RUN, runtime.currentState());
     }
 
     @Test
@@ -59,7 +72,7 @@ class ExecutionRuntimeTest {
         final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.SAFE, 5, 10, 100_000);
 
         final UUID rejectedIntentId = UUID.randomUUID();
-        journal.append(orderIntentEvent(time, rejectedIntentId, "BTCUSDT|0.10", "S07:I03:VA07-03:BA01"));
+        journal.append(orderIntentEvent(time, rejectedIntentId, "forex-account|BTCUSDT|0.10", "S07:I03:VA07-03:BA01"));
         runtime.tickCycle();
 
         assertEquals(0, brokerSession.submitted().size());
@@ -76,7 +89,7 @@ class ExecutionRuntimeTest {
         assertEquals("forex-execution-node-test", rejected.sourceProcessId());
 
         final UUID pendingIntent = UUID.randomUUID();
-        journal.append(orderIntentEvent(time, pendingIntent, "ETHUSD|0.20", "S07:I04:VA07-04:BA01"));
+        journal.append(orderIntentEvent(time, pendingIntent, "forex-account|ETHUSD|0.20", "S07:I04:VA07-04:BA01"));
         final var runRuntime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.RUN, 5, 10, 100_000);
         runRuntime.tickCycle();
         assertEquals(1, runRuntime.pendingIntents());
@@ -94,7 +107,7 @@ class ExecutionRuntimeTest {
         final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.HALT, 5, 10, 100_000);
 
         final UUID rejectedIntentId = UUID.randomUUID();
-        journal.append(orderIntentEvent(time, rejectedIntentId, "BTCUSDT|0.10", "S07:I03:VA07-03:BA01"));
+        journal.append(orderIntentEvent(time, rejectedIntentId, "forex-account|BTCUSDT|0.10", "S07:I03:VA07-03:BA01"));
         runtime.tickCycle();
 
         assertEquals(0, brokerSession.submitted().size());
@@ -111,7 +124,7 @@ class ExecutionRuntimeTest {
         assertEquals("forex-execution-node-test", rejected.sourceProcessId());
 
         final UUID pendingIntent = UUID.randomUUID();
-        journal.append(orderIntentEvent(time, pendingIntent, "ETHUSD|0.20", "S07:I04:VA07-04:BA01"));
+        journal.append(orderIntentEvent(time, pendingIntent, "forex-account|ETHUSD|0.20", "S07:I04:VA07-04:BA01"));
         final var runRuntime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.RUN, 5, 10, 100_000);
         runRuntime.tickCycle();
         assertEquals(1, runRuntime.pendingIntents());
@@ -128,7 +141,7 @@ class ExecutionRuntimeTest {
         final var brokerSession = new StubBrokerSession();
         final EventEmitter emitter = new EventEmitter(journal, time);
         journal.append(emitter.createRiskDecisionEvent("forex", ExecutionState.KILL, "operator kill").envelope());
-        journal.append(orderIntentEvent(time, UUID.randomUUID(), "BTCUSDT|0.10", "S07:I03:VA07-03:BA01"));
+        journal.append(orderIntentEvent(time, UUID.randomUUID(), "forex-account|BTCUSDT|0.10", "S07:I03:VA07-03:BA01"));
 
         final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.RUN, 5, 10, 100_000);
         runtime.tickCycle();
@@ -184,9 +197,9 @@ class ExecutionRuntimeTest {
         final var brokerSession = new StubBrokerSession();
         final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.RUN, 5, 10, 100_000);
 
-        journal.append(orderIntentEvent(time, UUID.randomUUID(), "BTCUSDT|0.10", "S07:I03:VA07-03:BA01"));
-        journal.append(orderIntentEvent(time, UUID.randomUUID(), "ETHUSD|0.20", "S07:I04:VA07-04:BA01"));
-        journal.append(orderIntentEvent(time, UUID.randomUUID(), "XAUUSD|0.30", "S07:I05:VA07-05:BA01"));
+        journal.append(orderIntentEvent(time, UUID.randomUUID(), "forex-account|BTCUSDT|0.10", "S07:I03:VA07-03:BA01"));
+        journal.append(orderIntentEvent(time, UUID.randomUUID(), "forex-account|ETHUSD|0.20", "S07:I04:VA07-04:BA01"));
+        journal.append(orderIntentEvent(time, UUID.randomUUID(), "forex-account|XAUUSD|0.30", "S07:I05:VA07-05:BA01"));
         runtime.tickCycle();
 
         time.advanceBy(Duration.ofSeconds(5));
@@ -203,13 +216,13 @@ class ExecutionRuntimeTest {
         final var brokerSession = new StubBrokerSession();
         final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.RUN, 5, 100, 2);
 
-        journal.append(orderIntentEvent(time, UUID.randomUUID(), "BTCUSDT|0.10", "S07:I03:VA07-03:BA01"));
+        journal.append(orderIntentEvent(time, UUID.randomUUID(), "forex-account|BTCUSDT|0.10", "S07:I03:VA07-03:BA01"));
         runtime.tickCycle();
         time.advanceBy(Duration.ofMillis(1));
-        journal.append(orderIntentEvent(time, UUID.randomUUID(), "ETHUSD|0.20", "S07:I04:VA07-04:BA01"));
+        journal.append(orderIntentEvent(time, UUID.randomUUID(), "forex-account|ETHUSD|0.20", "S07:I04:VA07-04:BA01"));
         runtime.tickCycle();
         time.advanceBy(Duration.ofMillis(1));
-        journal.append(orderIntentEvent(time, UUID.randomUUID(), "XAUUSD|0.30", "S07:I05:VA07-05:BA01"));
+        journal.append(orderIntentEvent(time, UUID.randomUUID(), "forex-account|XAUUSD|0.30", "S07:I05:VA07-05:BA01"));
         runtime.tickCycle();
 
         assertEquals(2, runtime.processedEvents());
@@ -222,9 +235,9 @@ class ExecutionRuntimeTest {
         final var brokerSession = new StubBrokerSession();
         final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.RUN, 5, 100, 100_000);
 
-        final EventEnvelope okFirst = orderIntentEvent(time, UUID.randomUUID(), "BTCUSDT|0.10", "S07:I03:VA07-03:BA01");
+        final EventEnvelope okFirst = orderIntentEvent(time, UUID.randomUUID(), "forex-account|BTCUSDT|0.10", "S07:I03:VA07-03:BA01");
         final EventEnvelope bad = orderIntentEvent(time, UUID.randomUUID(), "BROKEN_PAYLOAD", "S07:I04:VA07-04:BA01");
-        final EventEnvelope okThird = orderIntentEvent(time, UUID.randomUUID(), "ETHUSD|0.20", "S07:I05:VA07-05:BA01");
+        final EventEnvelope okThird = orderIntentEvent(time, UUID.randomUUID(), "forex-account|ETHUSD|0.20", "S07:I05:VA07-05:BA01");
         journal.append(okFirst);
         journal.append(bad);
         journal.append(okThird);
@@ -253,7 +266,7 @@ class ExecutionRuntimeTest {
         final EventEnvelope malformedUuidEvent = orderIntentEventWithLocalIntentId(
                 time,
                 "broken-uuid",
-                "BTCUSDT|0.10",
+                "forex-account|BTCUSDT|0.10",
                 "S07:I03:VA07-03:BA01"
         );
         journal.append(malformedUuidEvent);
