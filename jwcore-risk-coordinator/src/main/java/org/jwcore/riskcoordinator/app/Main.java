@@ -31,7 +31,7 @@ public final class Main {
         final InputStream inputStream = Main.class.getResourceAsStream("/risk-coordinator.properties");
         final RiskCoordinatorConfig config = new RiskCoordinatorPropertiesLoader().load(inputStream);
         final RiskCoordinatorEngine engine = new RiskCoordinatorEngine(config.safeThreshold(), config.haltThreshold());
-        final RiskCoordinatorTailer tailer = new RiskCoordinatorTailer(eventsBusinessJournal, marketDataJournal);
+        final RiskCoordinatorTailer tailer = new RiskCoordinatorTailer(eventsBusinessJournal, marketDataJournal, config.receivedCapacity());
         final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> new Thread(r, "jwcore-risk-coordinator-tick"));
         final GracefulShutdownCoordinator coordinator = new GracefulShutdownCoordinator(Duration.ofSeconds(10), thread -> Runtime.getRuntime().addShutdownHook(thread));
         coordinator.register(new GracefulShutdownParticipant() {
