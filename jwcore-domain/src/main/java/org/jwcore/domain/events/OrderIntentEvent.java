@@ -18,7 +18,7 @@ public record OrderIntentEvent(String accountId, Instrument instrument, double s
     }
 
     public byte[] toPayload() {
-        return String.join("|", accountId, instrument.value(), Double.toString(size)).getBytes(StandardCharsets.UTF_8);
+        return String.join("|", accountId, instrument.symbol(), Double.toString(size)).getBytes(StandardCharsets.UTF_8);
     }
 
     public static OrderIntentEvent fromPayload(final byte[] payload) {

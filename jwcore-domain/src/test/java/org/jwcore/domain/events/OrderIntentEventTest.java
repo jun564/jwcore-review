@@ -33,7 +33,7 @@ class OrderIntentEventTest {
         assertDoesNotThrow(() -> {
             final OrderIntentEvent parsed = OrderIntentEvent.fromPayload(payload);
             assertEquals("forex-account", parsed.accountId());
-            assertEquals("EURUSD", parsed.instrument().value());
+            assertEquals("EURUSD", parsed.instrument().symbol());
             assertEquals(0.2d, parsed.size());
         });
     }
