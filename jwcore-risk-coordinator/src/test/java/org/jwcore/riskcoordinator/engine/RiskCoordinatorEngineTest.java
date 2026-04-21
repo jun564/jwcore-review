@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
 class RiskCoordinatorEngineTest {
@@ -103,4 +104,58 @@ class RiskCoordinatorEngineTest {
                 intentId
         );
     }
+
+    @Test
+    void shouldReturnEmptyMapForEmptyInput() {
+        final var engine = new RiskCoordinatorEngine(new BigDecimal("100"), new BigDecimal("150"));
+        assertEquals(0, engine.evaluate(List.of()).size());
+    }
+
+    @Test
+    void shouldIgnoreNonOrderSubmittedEvents() {
+        final var engine = new RiskCoordinatorEngine(new BigDecimal("100"), new BigDecimal("150"));
+        final byte[] payload = "crypto-account|intentId|BROKER-1|S07:I03:VA07-03:BA01|99|2026-04-20T10:00:00Z"
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        final UUID intentId = UUID.randomUUID();
+        final var intentEvent = new EventEnvelope(
+                UUID.randomUUID(), EventType.OrderIntentEvent, null, intentId.toString(),
+                CanonicalId.parse("S07:I03:VA07-03:BA01"),
+                IdempotencyKeys.generate(null, EventType.OrderIntentEvent, payload),
+                1L, Instant.parse("2026-04-19T08:00:00Z"), (byte) 1, payload,
+                "risk-coordinator-test", intentId);
+        assertEquals(0, engine.evaluate(List.of(intentEvent)).size());
+    }
+
+    @Test
+    void shouldSkipEventWhenSizeIsNotParseable() {
+        final var engine = new RiskCoordinatorEngine(new BigDecimal("100"), new BigDecimal("150"));
+        final var result = engine.evaluate(List.of(orderSubmittedEvent(
+                "crypto-account|" + UUID.randomUUID() + "|BROKER-1|S07:I03:VA07-03:BA01|NOT_A_NUMBER|2026-04-20T10:00:00Z")));
+        assertEquals(0, result.size());
+    }
+
+    @Test
+    void shouldEvaluateLegacyOverloadReturnRunState() {
+        final var engine = new RiskCoordinatorEngine(new BigDecimal("100"), new BigDecimal("150"));
+        final RiskAssessment assessment = engine.evaluate(new BigDecimal("40"), new BigDecimal("30"));
+        assertEquals(ExecutionState.RUN, assessment.desiredState());
+        assertEquals(new BigDecimal("70"), assessment.totalExposure());
+    }
+
+    @Test
+    void shouldEvaluateLegacyOverloadReturnHaltState() {
+        final var engine = new RiskCoordinatorEngine(new BigDecimal("100"), new BigDecimal("150"));
+        final RiskAssessment assessment = engine.evaluate(new BigDecimal("100"), new BigDecimal("60"));
+        assertEquals(ExecutionState.HALT, assessment.desiredState());
+    }
+
+    @Test
+    void shouldReturnLatestExposureByAccount() {
+        final var engine = new RiskCoordinatorEngine(new BigDecimal("100"), new BigDecimal("150"));
+        engine.evaluate(List.of(
+                orderSubmittedEvent("acct-A|" + UUID.randomUUID() + "|BROKER-1|S07:I03:VA07-03:BA01|80|2026-04-20T10:00:00Z")));
+        final var latest = engine.latestExposureByAccount();
+        assertEquals(new BigDecimal("80"), latest.get("acct-A"));
+    }
+
 }
