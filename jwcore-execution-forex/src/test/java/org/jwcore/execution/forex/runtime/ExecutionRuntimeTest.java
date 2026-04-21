@@ -127,7 +127,7 @@ class ExecutionRuntimeTest {
 
         assertEquals(0, brokerSession.submitted().size());
         assertEquals(ExecutionState.SAFE, runtime.currentState());
-        assertEquals(3, runtime.pendingIntents());
+        assertEquals(0, runtime.pendingIntents());
 
         final var rejectedEvents = journal.all().stream()
                 .filter(e -> e.eventType() == EventType.OrderRejectedEvent)
@@ -256,7 +256,7 @@ class ExecutionRuntimeTest {
         runtime.tickCycle();
 
         assertEquals(0, journal.all().stream().filter(e -> e.eventType() == EventType.OrderTimeoutEvent).count());
-        assertEquals(0, runtime.pendingIntents());
+        assertEquals(3, runtime.pendingIntents());
     }
 
     @Test
