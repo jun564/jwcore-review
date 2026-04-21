@@ -6,6 +6,7 @@ import org.jwcore.domain.EventEnvelope;
 import org.jwcore.domain.EventType;
 import org.jwcore.domain.IdempotencyKeys;
 import org.jwcore.execution.common.emit.EventEmitter;
+import org.jwcore.execution.common.registry.IntentRegistry;
 import org.jwcore.execution.common.state.ExecutionState;
 import org.jwcore.execution.crypto.broker.StubBrokerSession;
 import org.junit.jupiter.api.Test;
@@ -329,6 +330,38 @@ class ExecutionRuntimeTest {
                 .toList();
         assertEquals(1, failedEvents.size());
         assertEquals("java.lang.IllegalArgumentException", extractFailedErrorType(failedEvents.get(0)));
+    }
+
+    @Test
+    void shouldPreventDuplicateIntentAfterMarkTerminal() {
+        final var journal = new InMemoryEventJournal();
+        final var time = new ControllableTimeProvider(1L, Instant.parse("2026-04-19T08:00:00Z"));
+        final var brokerSession = new StubBrokerSession();
+        final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.RUN, 5, 30, 100, 100_000);
+        final UUID intentId = UUID.randomUUID();
+
+        journal.append(orderIntentEvent(time, intentId, "crypto-account|BTCUSDT|0.10", "S07:I03:VA07-03:BA01"));
+        runtime.tickCycle();
+        assertEquals(1, runtime.pendingIntents());
+
+        runtime.markTerminal(intentId);
+
+        time.advanceBy(Duration.ofMillis(1));
+        journal.append(orderIntentEvent(time, intentId, "crypto-account|BTCUSDT|0.10", "S07:I03:VA07-03:BA01"));
+        runtime.tickCycle();
+
+        assertTrue(intentRegistry(runtime).isTerminated(intentId));
+        assertEquals(0, runtime.pendingIntents());
+    }
+
+    private static IntentRegistry intentRegistry(final ExecutionRuntime runtime) {
+        try {
+            final var field = ExecutionRuntime.class.getDeclaredField("intentRegistry");
+            field.setAccessible(true);
+            return (IntentRegistry) field.get(runtime);
+        } catch (final ReflectiveOperationException exception) {
+            throw new RuntimeException(exception);
+        }
     }
 
     private static String extractRejectReasonCode(final EventEnvelope envelope) {

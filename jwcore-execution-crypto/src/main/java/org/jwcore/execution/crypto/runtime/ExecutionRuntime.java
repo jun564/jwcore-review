@@ -188,7 +188,7 @@ public final class ExecutionRuntime {
     }
 
     public void markTerminal(final UUID intentId) {
-        intentRegistry.remove(intentId);
+        intentRegistry.markTerminated(intentId);
     }
 
     public ExecutionState currentState() {
