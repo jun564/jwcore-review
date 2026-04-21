@@ -4,158 +4,264 @@ import org.jwcore.domain.CanonicalId;
 import org.jwcore.domain.EventEnvelope;
 import org.jwcore.domain.EventType;
 import org.jwcore.domain.IdempotencyKeys;
+import org.jwcore.domain.events.OrderCanceledEvent;
+import org.jwcore.domain.events.OrderFilledEvent;
+import org.jwcore.domain.events.OrderSubmittedEvent;
+import org.jwcore.domain.events.OrderUnknownEvent;
 import org.jwcore.execution.common.state.ExecutionState;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
-import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RiskCoordinatorEngineTest {
     @Test
-    void shouldReturnRunWhenExposureBelowSafeThreshold() {
-        final var engine = new RiskCoordinatorEngine(new BigDecimal("100"), new BigDecimal("150"));
+    void shouldAddExposureOnOrderSubmitted() {
+        final RiskCoordinatorEngine engine = new RiskCoordinatorEngine("risk-node-1");
 
-        final var result = engine.evaluate(List.of(orderSubmittedEvent("crypto-account|"
-                + UUID.randomUUID() + "|BROKER-1|S07:I03:VA07-03:BA01|99|2026-04-20T10:00:00Z")));
+        engine.apply(submitted("crypto", 100.0));
 
-        assertEquals(ExecutionState.RUN, result.get("crypto-account"));
+        assertEquals(new BigDecimal("100.0"), engine.exposureSnapshot().get("crypto"));
     }
 
     @Test
-    void shouldReturnSafeWhenExposureBetweenThresholds() {
-        final var engine = new RiskCoordinatorEngine(new BigDecimal("100"), new BigDecimal("150"));
+    void shouldSubtractExposureOnOrderFilled() {
+        final RiskCoordinatorEngine engine = new RiskCoordinatorEngine("risk-node-1");
+        engine.apply(submitted("crypto", 100.0));
 
-        final var result = engine.evaluate(List.of(orderSubmittedEvent(
-                "crypto-account|" + UUID.randomUUID() + "|BROKER-1|S07:I03:VA07-03:BA01|120|2026-04-20T10:00:00Z")));
+        engine.apply(filled("crypto", "40"));
 
-        assertEquals(ExecutionState.SAFE, result.get("crypto-account"));
+        assertEquals(new BigDecimal("60.0"), engine.exposureSnapshot().get("crypto"));
     }
 
     @Test
-    void shouldReturnHaltWhenExposureAboveHaltThreshold() {
-        final var engine = new RiskCoordinatorEngine(new BigDecimal("100"), new BigDecimal("150"));
+    void shouldSubtractExposureOnOrderCanceled() {
+        final RiskCoordinatorEngine engine = new RiskCoordinatorEngine("risk-node-1");
+        engine.apply(submitted("crypto", 100.0));
 
-        final var result = engine.evaluate(List.of(orderSubmittedEvent(
-                "crypto-account|" + UUID.randomUUID() + "|BROKER-1|S07:I03:VA07-03:BA01|151|2026-04-20T10:00:00Z")));
+        engine.apply(canceled("crypto", "30"));
 
-        assertEquals(ExecutionState.HALT, result.get("crypto-account"));
+        assertEquals(new BigDecimal("70.0"), engine.exposureSnapshot().get("crypto"));
     }
 
     @Test
-    void shouldAggregateExposurePerAccountId() {
-        final var engine = new RiskCoordinatorEngine(new BigDecimal("100"), new BigDecimal("150"));
+    void shouldNotChangeExposureOnOrderUnknown() {
+        final RiskCoordinatorEngine engine = new RiskCoordinatorEngine("risk-node-1");
+        engine.apply(submitted("crypto", 100.0));
 
-        final var result = engine.evaluate(List.of(
-                orderSubmittedEvent("crypto-account|" + UUID.randomUUID() + "|BROKER-1|S07:I03:VA07-03:BA01|80|2026-04-20T10:00:00Z"),
-                orderSubmittedEvent("crypto-account|" + UUID.randomUUID() + "|BROKER-2|S07:I04:VA07-04:BA01|30|2026-04-20T10:00:01Z"),
-                orderSubmittedEvent("forex-account|" + UUID.randomUUID() + "|BROKER-3|S07:I05:VA07-05:BA01|170|2026-04-20T10:00:02Z")
-        ));
+        engine.apply(unknown("crypto"));
 
-        assertEquals(ExecutionState.SAFE, result.get("crypto-account"));
-        assertEquals(ExecutionState.HALT, result.get("forex-account"));
+        assertEquals(new BigDecimal("100.0"), engine.exposureSnapshot().get("crypto"));
+        assertEquals(ExecutionState.SAFE, engine.currentStates().get("crypto"));
     }
 
     @Test
-    void shouldSkipEventWhenAccountIdMissing() {
-        final var engine = new RiskCoordinatorEngine(new BigDecimal("100"), new BigDecimal("150"));
+    void shouldTransitionAccountToSafeOnOrderUnknownEvent() {
+        final RiskCoordinatorEngine engine = new RiskCoordinatorEngine("risk-node-1");
 
-        final var result = engine.evaluate(List.of(orderSubmittedEvent("|"
-                + UUID.randomUUID() + "|BROKER-1|S07:I03:VA07-03:BA01|130|2026-04-20T10:00:00Z")));
+        engine.apply(unknown("crypto"));
 
-        assertFalse(result.containsKey(""));
-        assertEquals(0, result.size());
+        assertEquals(ExecutionState.SAFE, engine.currentStates().get("crypto"));
     }
 
     @Test
-    void shouldAggregateExposureAsSize() {
-        final var engine = new RiskCoordinatorEngine(new BigDecimal("100"), new BigDecimal("150"));
+    void shouldEmitRiskDecisionOnlyWhenStateChanges() {
+        final RiskCoordinatorEngine engine = new RiskCoordinatorEngine("risk-node-1");
 
-        final var result = engine.evaluate(List.of(
-                orderSubmittedEvent("crypto-account|" + UUID.randomUUID() + "|BROKER-1|S07:I03:VA07-03:BA01|40.5|2026-04-20T10:00:00Z"),
-                orderSubmittedEvent("crypto-account|" + UUID.randomUUID() + "|BROKER-2|S07:I04:VA07-04:BA01|59.5|2026-04-20T10:00:01Z"),
-                orderSubmittedEvent("crypto-account|" + UUID.randomUUID() + "|BROKER-3|S07:I05:VA07-05:BA01|10|2026-04-20T10:00:02Z")
-        ));
+        assertTrue(engine.evaluateAndBuildIfChanged("crypto").isPresent());
+        assertFalse(engine.evaluateAndBuildIfChanged("crypto").isPresent());
 
-        assertEquals(ExecutionState.SAFE, result.get("crypto-account"));
+        engine.apply(unknown("crypto"));
+        assertTrue(engine.evaluateAndBuildIfChanged("crypto").isPresent());
+        assertFalse(engine.evaluateAndBuildIfChanged("crypto").isPresent());
     }
 
-    private static EventEnvelope orderSubmittedEvent(final String payloadText) {
-        final byte[] payload = payloadText.getBytes(StandardCharsets.UTF_8);
-        final UUID intentId = UUID.randomUUID();
+    @Test
+    void shouldEmitInitialPublishForAllMonitoredAccounts() {
+        final RiskCoordinatorEngine engine = new RiskCoordinatorEngine("risk-node-1");
+
+        final var events = engine.initialPublishFromCurrentState(List.of("crypto", "forex"));
+
+        assertEquals(2, events.size());
+    }
+
+    @Test
+    void shouldEmitInitialPublishRunForMonitoredAccountWithoutAnyEvents() {
+        final RiskCoordinatorEngine engine = new RiskCoordinatorEngine("risk-node-1");
+
+        final var events = engine.initialPublishFromCurrentState(List.of("crypto"));
+
+        assertEquals(ExecutionState.RUN, events.get(0).desiredState());
+    }
+
+    @Test
+    void shouldDefaultToRunWhenAccountHasNoStateEntry() {
+        final RiskCoordinatorEngine engine = new RiskCoordinatorEngine("risk-node-1");
+
+        final var decision = engine.evaluateAndBuildIfChanged("crypto").orElseThrow();
+
+        assertEquals(ExecutionState.RUN, decision.desiredState());
+    }
+
+    @Test
+    void shouldNotMutateStateOfOtherAccountsWhenOneAccountTransitions() {
+        final RiskCoordinatorEngine engine = new RiskCoordinatorEngine("risk-node-1");
+        engine.apply(unknown("crypto"));
+
+        engine.evaluateAndBuildIfChanged("forex");
+
+        assertEquals(ExecutionState.SAFE, engine.currentStates().get("crypto"));
+        assertFalse(engine.currentStates().containsKey("forex"));
+    }
+
+    @Test
+    void shouldReturnAffectedAccountIdsFromApply() {
+        final RiskCoordinatorEngine engine = new RiskCoordinatorEngine("risk-node-1");
+
+        final Set<String> affected = engine.apply(submitted("crypto", 100.0));
+
+        assertEquals(Set.of("crypto"), affected);
+    }
+
+    @Test
+    void shouldSkipMalformedEventsWithWarning() {
+        final RiskCoordinatorEngine engine = new RiskCoordinatorEngine("risk-node-1");
+        final TestHandler handler = new TestHandler();
+        final Logger logger = Logger.getLogger(RiskCoordinatorEngine.class.getName());
+        logger.addHandler(handler);
+        try {
+            final EventEnvelope malformed = envelope(EventType.OrderSubmittedEvent, "invalid".getBytes());
+
+            final Set<String> affected = engine.apply(malformed);
+
+            assertTrue(affected.isEmpty());
+            assertTrue(handler.warningSeen);
+        } finally {
+            logger.removeHandler(handler);
+        }
+    }
+
+    @Test
+    void shouldFullLifecycleSequence() {
+        final RiskCoordinatorEngine engine = new RiskCoordinatorEngine("risk-node-1");
+
+        engine.apply(submitted("crypto", 100.0));
+        engine.apply(submitted("crypto", 50.0));
+        engine.apply(filled("crypto", "100"));
+        engine.apply(unknown("crypto"));
+
+        assertEquals(new BigDecimal("50.0"), engine.exposureSnapshot().get("crypto"));
+        assertEquals(ExecutionState.SAFE, engine.currentStates().get("crypto"));
+    }
+
+    @Test
+    void shouldLogWarningWhenFilledWouldDriveExposureBelowZero() {
+        final RiskCoordinatorEngine engine = new RiskCoordinatorEngine("risk-node-1");
+        engine.apply(submitted("crypto", 10.0));
+
+        final TestHandler handler = new TestHandler();
+        final Logger logger = Logger.getLogger(RiskCoordinatorEngine.class.getName());
+        logger.addHandler(handler);
+        try {
+            engine.apply(filled("crypto", "30"));
+        } finally {
+            logger.removeHandler(handler);
+        }
+
+        assertEquals(BigDecimal.ZERO, engine.exposureSnapshot().get("crypto"));
+        assertTrue(handler.warningSeen);
+    }
+
+    private static EventEnvelope submitted(final String accountId, final double size) {
+        final OrderSubmittedEvent event = new OrderSubmittedEvent(
+                accountId,
+                UUID.randomUUID(),
+                "BROKER-1",
+                CanonicalId.parse("S07:I03:VA07-03:BA01"),
+                size,
+                Instant.parse("2026-04-20T10:00:00Z"),
+                null
+        );
+        return envelope(EventType.OrderSubmittedEvent, event.toPayload());
+    }
+
+    private static EventEnvelope filled(final String accountId, final String size) {
+        final OrderFilledEvent event = new OrderFilledEvent(
+                accountId,
+                UUID.randomUUID().toString(),
+                "BROKER-1",
+                CanonicalId.parse("S07:I03:VA07-03:BA01"),
+                new BigDecimal(size),
+                Instant.parse("2026-04-20T10:00:00Z"),
+                null
+        );
+        return envelope(EventType.OrderFilledEvent, event.toPayload());
+    }
+
+    private static EventEnvelope canceled(final String accountId, final String size) {
+        final OrderCanceledEvent event = new OrderCanceledEvent(
+                accountId,
+                UUID.randomUUID().toString(),
+                "BROKER-1",
+                CanonicalId.parse("S07:I03:VA07-03:BA01"),
+                new BigDecimal(size),
+                "reason",
+                Instant.parse("2026-04-20T10:00:00Z"),
+                null
+        );
+        return envelope(EventType.OrderCanceledEvent, event.toPayload());
+    }
+
+    private static EventEnvelope unknown(final String accountId) {
+        final OrderUnknownEvent event = new OrderUnknownEvent(
+                accountId,
+                UUID.randomUUID().toString(),
+                "UNKNOWN",
+                Instant.parse("2026-04-20T10:00:00Z"),
+                null
+        );
+        return envelope(EventType.OrderUnknownEvent, event.toPayload());
+    }
+
+    private static EventEnvelope envelope(final EventType type, final byte[] payload) {
         return new EventEnvelope(
                 UUID.randomUUID(),
-                EventType.OrderSubmittedEvent,
+                type,
                 null,
-                intentId.toString(),
-                CanonicalId.parse("S07:I03:VA07-03:BA01"),
-                IdempotencyKeys.generate(null, EventType.OrderSubmittedEvent, payload),
+                null,
+                null,
+                IdempotencyKeys.generate(null, type, payload),
                 1L,
                 Instant.parse("2026-04-19T08:00:00Z"),
                 (byte) 1,
                 payload,
                 "risk-coordinator-test",
-                intentId
+                UUID.randomUUID()
         );
     }
 
-    @Test
-    void shouldReturnEmptyMapForEmptyInput() {
-        final var engine = new RiskCoordinatorEngine(new BigDecimal("100"), new BigDecimal("150"));
-        assertEquals(0, engine.evaluate(List.of()).size());
-    }
+    private static final class TestHandler extends Handler {
+        private boolean warningSeen;
 
-    @Test
-    void shouldIgnoreNonOrderSubmittedEvents() {
-        final var engine = new RiskCoordinatorEngine(new BigDecimal("100"), new BigDecimal("150"));
-        final byte[] payload = "crypto-account|intentId|BROKER-1|S07:I03:VA07-03:BA01|99|2026-04-20T10:00:00Z"
-                .getBytes(java.nio.charset.StandardCharsets.UTF_8);
-        final UUID intentId = UUID.randomUUID();
-        final var intentEvent = new EventEnvelope(
-                UUID.randomUUID(), EventType.OrderIntentEvent, null, intentId.toString(),
-                CanonicalId.parse("S07:I03:VA07-03:BA01"),
-                IdempotencyKeys.generate(null, EventType.OrderIntentEvent, payload),
-                1L, Instant.parse("2026-04-19T08:00:00Z"), (byte) 1, payload,
-                "risk-coordinator-test", intentId);
-        assertEquals(0, engine.evaluate(List.of(intentEvent)).size());
-    }
+        @Override
+        public void publish(final LogRecord record) {
+            if (record.getLevel().intValue() >= Level.WARNING.intValue()) {
+                warningSeen = true;
+            }
+        }
 
-    @Test
-    void shouldSkipEventWhenSizeIsNotParseable() {
-        final var engine = new RiskCoordinatorEngine(new BigDecimal("100"), new BigDecimal("150"));
-        final var result = engine.evaluate(List.of(orderSubmittedEvent(
-                "crypto-account|" + UUID.randomUUID() + "|BROKER-1|S07:I03:VA07-03:BA01|NOT_A_NUMBER|2026-04-20T10:00:00Z")));
-        assertEquals(0, result.size());
+        @Override public void flush() { }
+        @Override public void close() { }
     }
-
-    @Test
-    void shouldEvaluateLegacyOverloadReturnRunState() {
-        final var engine = new RiskCoordinatorEngine(new BigDecimal("100"), new BigDecimal("150"));
-        final RiskAssessment assessment = engine.evaluate(new BigDecimal("40"), new BigDecimal("30"));
-        assertEquals(ExecutionState.RUN, assessment.desiredState());
-        assertEquals(new BigDecimal("70"), assessment.totalExposure());
-    }
-
-    @Test
-    void shouldEvaluateLegacyOverloadReturnHaltState() {
-        final var engine = new RiskCoordinatorEngine(new BigDecimal("100"), new BigDecimal("150"));
-        final RiskAssessment assessment = engine.evaluate(new BigDecimal("100"), new BigDecimal("60"));
-        assertEquals(ExecutionState.HALT, assessment.desiredState());
-    }
-
-    @Test
-    void shouldReturnLatestExposureByAccount() {
-        final var engine = new RiskCoordinatorEngine(new BigDecimal("100"), new BigDecimal("150"));
-        engine.evaluate(List.of(
-                orderSubmittedEvent("acct-A|" + UUID.randomUUID() + "|BROKER-1|S07:I03:VA07-03:BA01|80|2026-04-20T10:00:00Z")));
-        final var latest = engine.latestExposureByAccount();
-        assertEquals(new BigDecimal("80"), latest.get("acct-A"));
-    }
-
 }

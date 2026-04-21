@@ -88,7 +88,21 @@ public final class EventEmitter {
 
     public RiskDecisionEvent createRiskDecisionEvent(final String accountId, final ExecutionState desiredState, final String reason) {
         final byte[] payload = String.join("|", accountId, desiredState.name(), reason).getBytes(StandardCharsets.UTF_8);
-        final EventEnvelope envelope = createEnvelope(EventType.RiskDecisionEvent, null, null, null, payload);
+        final String idempotencyKey = "risk-decision:" + accountId + ":" + desiredState.name() + ":" + reason;
+        final EventEnvelope envelope = new EventEnvelope(
+                UUID.randomUUID(),
+                EventType.RiskDecisionEvent,
+                null,
+                null,
+                null,
+                idempotencyKey,
+                timeProvider.monotonicTime(),
+                timeProvider.eventTime(),
+                PAYLOAD_VERSION,
+                payload,
+                sourceProcessId,
+                null
+        );
         return new RiskDecisionEvent(accountId, desiredState, reason, envelope);
     }
 
