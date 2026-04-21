@@ -113,6 +113,20 @@ public final class IntentRegistry {
         return Optional.ofNullable(intentPhases.get(intentId));
     }
 
+    public int countInPhase(final IntentPhase phase) {
+        Objects.requireNonNull(phase, "phase cannot be null");
+        if (phase == IntentPhase.TERMINATED) {
+            return terminatedCorrelationIds.size();
+        }
+        int count = 0;
+        for (final IntentPhase current : intentPhases.values()) {
+            if (current == phase) {
+                count++;
+            }
+        }
+        return count;
+    }
+
     public void markSubmitted(final UUID intentId) {
         markSubmitted(intentId, timeProvider.eventTime());
     }
@@ -122,6 +136,16 @@ public final class IntentRegistry {
             return;
         }
         if (!byIntentId.containsKey(intentId)) {
+            return;
+        }
+        if (terminatedCorrelationIds.contains(intentId)) {
+            return;
+        }
+        final IntentPhase currentPhase = intentPhases.get(intentId);
+        if (currentPhase == IntentPhase.SUBMITTED || currentPhase == IntentPhase.TERMINATED) {
+            return;
+        }
+        if (currentPhase != IntentPhase.PENDING_SUBMIT) {
             return;
         }
         intentPhases.put(intentId, IntentPhase.SUBMITTED);

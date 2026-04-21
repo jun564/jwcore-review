@@ -53,7 +53,8 @@ class ExecutionRuntimeTest {
         final var brokerSession = new StubBrokerSession();
         final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.RUN, 5, 6, 10, 100_000);
 
-        journal.append(orderIntentEvent(time, UUID.randomUUID(), "crypto-account|BTCUSDT|0.10", "S07:I03:VA07-03:BA01"));
+        final UUID intentId = UUID.randomUUID();
+        journal.append(orderIntentEvent(time, intentId, "crypto-account|BTCUSDT|0.10", "S07:I03:VA07-03:BA01"));
         runtime.tickCycle();
 
         time.advanceBy(Duration.ofSeconds(7));
@@ -63,6 +64,7 @@ class ExecutionRuntimeTest {
                 .filter(e -> e.eventType() == EventType.OrderUnknownEvent)
                 .toList();
         assertEquals(1, unknownEvents.size());
+        assertEquals(intentId, unknownEvents.get(0).correlationId());
         assertEquals("BROKER_TIMEOUT", new String(unknownEvents.get(0).payload(), StandardCharsets.UTF_8).split("\\|", 3)[1]);
     }
 
@@ -82,7 +84,7 @@ class ExecutionRuntimeTest {
 
         time.advanceBy(Duration.ofSeconds(5));
         runtime.tickCycle();
-        assertTrue(journal.all().stream().anyMatch(e -> e.eventType() == EventType.OrderTimeoutEvent));
+        assertTrue(journal.all().stream().noneMatch(e -> e.eventType() == EventType.OrderTimeoutEvent));
         assertTrue(journal.all().stream().anyMatch(e -> e.eventType() == EventType.MarginUpdateEvent));
     }
 
@@ -125,7 +127,7 @@ class ExecutionRuntimeTest {
 
         assertEquals(0, brokerSession.submitted().size());
         assertEquals(ExecutionState.SAFE, runtime.currentState());
-        assertEquals(0, runtime.pendingIntents());
+        assertEquals(3, runtime.pendingIntents());
 
         final var rejectedEvents = journal.all().stream()
                 .filter(e -> e.eventType() == EventType.OrderRejectedEvent)
@@ -144,7 +146,7 @@ class ExecutionRuntimeTest {
 
         time.advanceBy(Duration.ofSeconds(5));
         runRuntime.tickCycle();
-        assertTrue(journal.all().stream().anyMatch(e -> e.eventType() == EventType.OrderTimeoutEvent));
+        assertTrue(journal.all().stream().noneMatch(e -> e.eventType() == EventType.OrderTimeoutEvent));
     }
 
     @Test
@@ -179,7 +181,7 @@ class ExecutionRuntimeTest {
 
         time.advanceBy(Duration.ofSeconds(5));
         runRuntime.tickCycle();
-        assertTrue(journal.all().stream().anyMatch(e -> e.eventType() == EventType.OrderTimeoutEvent));
+        assertTrue(journal.all().stream().noneMatch(e -> e.eventType() == EventType.OrderTimeoutEvent));
     }
 
     @Test
@@ -264,7 +266,8 @@ class ExecutionRuntimeTest {
         final var brokerSession = new StubBrokerSession();
         final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.RUN, 5, 30, 100, 2);
 
-        journal.append(orderIntentEvent(time, UUID.randomUUID(), "crypto-account|BTCUSDT|0.10", "S07:I03:VA07-03:BA01"));
+        final UUID intentId = UUID.randomUUID();
+        journal.append(orderIntentEvent(time, intentId, "crypto-account|BTCUSDT|0.10", "S07:I03:VA07-03:BA01"));
         runtime.tickCycle();
         time.advanceBy(Duration.ofMillis(1));
         journal.append(orderIntentEvent(time, UUID.randomUUID(), "crypto-account|ETHUSD|0.20", "S07:I04:VA07-04:BA01"));

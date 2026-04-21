@@ -168,6 +168,7 @@ class IntentRegistryTest {
         final var submitted = emitter.emitOrderSubmitted(pendingIntent, "BROKER-ORD-22", 0.50d).envelope();
         registry.absorb(List.of(submitted));
         assertEquals(IntentPhase.SUBMITTED, registry.getPhase(intentId).orElseThrow());
+        assertEquals(1, registry.countInPhase(IntentPhase.SUBMITTED));
 
         final var filled = emitter.createEnvelope(
                 EventType.OrderFilledEvent,
@@ -179,5 +180,6 @@ class IntentRegistryTest {
         );
         registry.absorb(List.of(filled));
         assertTrue(registry.getPhase(intentId).isEmpty());
+        assertEquals(0, registry.countInPhase(IntentPhase.SUBMITTED));
     }
 }
