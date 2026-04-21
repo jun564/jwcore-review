@@ -10,6 +10,7 @@ public enum EventType {
     MarginUpdateEvent,
     StateRebuiltEvent,
     OrderFilledEvent,
+    OrderSubmittedEvent,
     OrderRejectedEvent,
     OrderCanceledEvent,
     OrderUnknownEvent,

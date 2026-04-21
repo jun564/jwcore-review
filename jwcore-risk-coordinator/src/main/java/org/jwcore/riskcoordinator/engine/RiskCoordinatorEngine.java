@@ -32,7 +32,7 @@ public final class RiskCoordinatorEngine {
 
         final Map<String, BigDecimal> exposureByAccount = new LinkedHashMap<>();
         for (final EventEnvelope envelope : received) {
-            if (envelope.eventType() != EventType.OrderIntentEvent) {
+            if (envelope.eventType() != EventType.OrderSubmittedEvent) {
                 continue;
             }
             final ParsedExposure parsedExposure = parseExposure(envelope);
@@ -65,15 +65,15 @@ public final class RiskCoordinatorEngine {
 
     private ParsedExposure parseExposure(final EventEnvelope envelope) {
         final String payloadText = new String(envelope.payload(), StandardCharsets.UTF_8);
-        final String[] parts = payloadText.split("\\|", 3);
-        if (parts.length != 3 || parts[0].isBlank()) {
-            LOGGER.warning(() -> "Skipping malformed OrderIntentEvent for exposure aggregation, eventId=" + envelope.eventId());
+        final String[] parts = payloadText.split("\\|", 6);
+        if (parts.length != 6 || parts[0].isBlank()) {
+            LOGGER.warning(() -> "Skipping malformed OrderSubmittedEvent for exposure aggregation, eventId=" + envelope.eventId());
             return null;
         }
         try {
-            return new ParsedExposure(parts[0], new BigDecimal(parts[2].trim()).abs());
+            return new ParsedExposure(parts[0], new BigDecimal(parts[4].trim()).abs());
         } catch (final NumberFormatException exception) {
-            LOGGER.warning(() -> "Skipping OrderIntentEvent with unparsable exposure, eventId=" + envelope.eventId());
+            LOGGER.warning(() -> "Skipping OrderSubmittedEvent with unparsable size, eventId=" + envelope.eventId());
             return null;
         }
     }

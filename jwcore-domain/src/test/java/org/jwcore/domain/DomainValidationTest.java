@@ -93,7 +93,7 @@ class DomainValidationTest {
         java.util.Set<String> required = java.util.Set.of(
             "OrderIntentEvent", "OrderRejectedEvent", "OrderTimeoutEvent",
             "MarketDataEvent", "RiskDecisionEvent", "MarginUpdateEvent",
-            "StateRebuiltEvent", "OrderFilledEvent", "OrderCanceledEvent",
+            "StateRebuiltEvent", "OrderFilledEvent", "OrderSubmittedEvent", "OrderCanceledEvent",
             "OrderUnknownEvent", "ExecutionEvent", "ParameterUpdatedEvent",
             "EventProcessingFailedEvent"
         );

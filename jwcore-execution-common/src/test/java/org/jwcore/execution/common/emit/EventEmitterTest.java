@@ -15,6 +15,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -46,8 +47,19 @@ class EventEmitterTest {
         assertEquals(EventType.OrderTimeoutEvent, journal.all().get(2).eventType());
         assertEquals(intentId, timeout.envelope().correlationId());
 
+        final var submitted = emitter.emitOrderSubmitted(pendingIntent, "BROKER-ORD-1", 0.75d);
+        assertEquals(EventType.OrderSubmittedEvent, journal.all().get(3).eventType());
+        assertEquals(intentId, submitted.envelope().correlationId());
+        assertEquals("exec-crypto-1", submitted.envelope().sourceProcessId());
+        assertArrayEquals(submitted.toPayload(), submitted.envelope().payload());
+
+        final var unknown = emitter.emitOrderUnknown(pendingIntent, "BROKER_TIMEOUT");
+        assertEquals(EventType.OrderUnknownEvent, journal.all().get(4).eventType());
+        assertEquals(intentId, unknown.envelope().correlationId());
+        assertEquals("BROKER_TIMEOUT", unknown.reason());
+
         final var rejected = emitter.emitOrderRejected(pendingIntent, RejectReason.RISK_LIMIT);
-        assertEquals(EventType.OrderRejectedEvent, journal.all().get(3).eventType());
+        assertEquals(EventType.OrderRejectedEvent, journal.all().get(5).eventType());
         assertEquals("exec-crypto-1", rejected.envelope().sourceProcessId());
         assertEquals(intentId, rejected.envelope().correlationId());
         assertEquals(RejectReason.RISK_LIMIT, rejected.reason());
@@ -62,8 +74,8 @@ class EventEmitterTest {
                 List.of(new Discrepancy("desc", "expected", "actual", time.eventTime()))
         );
         emitter.emit(rebuilt.envelope());
-        assertEquals(EventType.StateRebuiltEvent, journal.all().get(4).eventType());
-        assertEquals(5, journal.all().size());
+        assertEquals(EventType.StateRebuiltEvent, journal.all().get(6).eventType());
+        assertEquals(7, journal.all().size());
         assertNotNull(rebuilt.envelope().correlationId());
     }
 
@@ -92,5 +104,35 @@ class EventEmitterTest {
         assertEquals(EventType.EventProcessingFailedEvent, failedEvent.envelope().eventType());
         assertNull(failedEvent.envelope().correlationId());
         assertEquals("exec-crypto-1", failedEvent.envelope().sourceProcessId());
+    }
+
+    @Test
+    void shouldThrowWhenEmitOrderSubmittedCalledWithNullBrokerOrderId() {
+        final var journal = new org.jwcore.execution.common.registry.InMemoryEventJournal();
+        final var time = new ControllableTimeProvider(1L, Instant.parse("2026-04-19T08:00:00Z"));
+        final var emitter = new EventEmitter(journal, time, "exec-crypto-1");
+        final var intent = new PendingIntent(UUID.randomUUID(), CanonicalId.parse("S07:I03:VA07-03:BA01"), "crypto", time.eventTime(), 5000L);
+
+        assertThrows(NullPointerException.class, () -> emitter.emitOrderSubmitted(intent, null, 0.50d));
+    }
+
+    @Test
+    void shouldThrowWhenEmitOrderSubmittedCalledWithBlankBrokerOrderId() {
+        final var journal = new org.jwcore.execution.common.registry.InMemoryEventJournal();
+        final var time = new ControllableTimeProvider(1L, Instant.parse("2026-04-19T08:00:00Z"));
+        final var emitter = new EventEmitter(journal, time, "exec-crypto-1");
+        final var intent = new PendingIntent(UUID.randomUUID(), CanonicalId.parse("S07:I03:VA07-03:BA01"), "crypto", time.eventTime(), 5000L);
+
+        assertThrows(IllegalArgumentException.class, () -> emitter.emitOrderSubmitted(intent, "   ", 0.50d));
+    }
+
+    @Test
+    void shouldThrowWhenEmitOrderSubmittedCalledWithNonPositiveSize() {
+        final var journal = new org.jwcore.execution.common.registry.InMemoryEventJournal();
+        final var time = new ControllableTimeProvider(1L, Instant.parse("2026-04-19T08:00:00Z"));
+        final var emitter = new EventEmitter(journal, time, "exec-crypto-1");
+        final var intent = new PendingIntent(UUID.randomUUID(), CanonicalId.parse("S07:I03:VA07-03:BA01"), "crypto", time.eventTime(), 5000L);
+
+        assertThrows(IllegalArgumentException.class, () -> emitter.emitOrderSubmitted(intent, "BROKER-1", 0.0d));
     }
 }

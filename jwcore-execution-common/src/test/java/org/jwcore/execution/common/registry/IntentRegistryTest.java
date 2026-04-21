@@ -29,7 +29,7 @@ class IntentRegistryTest {
         assertEquals(intentId, registry.findIntentId(canonicalId).orElseThrow());
 
         time.advanceBy(Duration.ofSeconds(2));
-        registry.checkTimeouts();
+        registry.checkTimeouts(30_000L);
         assertTrue(registry.findCanonicalId(intentId).isEmpty());
         assertEquals(1, journal.all().size());
 
@@ -91,5 +91,95 @@ class IntentRegistryTest {
 
         assertTrue(registry.isTerminated(terminatedCorrelationId));
         assertFalse(registry.isTerminated(nonTerminalCorrelationId));
+    }
+
+    @Test
+    void shouldMarkIntentAsSubmittedOnOrderSubmittedEvent() {
+        final var journal = new InMemoryEventJournal();
+        final var time = new ControllableTimeProvider(1L, Instant.parse("2026-04-19T08:00:00Z"));
+        final var emitter = new EventEmitter(journal, time, "exec-test-node");
+        final var registry = new IntentRegistry(time, emitter);
+        final CanonicalId canonicalId = CanonicalId.parse("S07:I03:VA07-03:BA01");
+
+        final UUID correlationId = UUID.randomUUID();
+        registry.bind(correlationId, canonicalId, "crypto", time.eventTime(), 1000L);
+        final PendingIntent pendingIntent = new PendingIntent(correlationId, canonicalId, "crypto", time.eventTime(), 1000L);
+        final var submittedEvent = emitter.emitOrderSubmitted(pendingIntent, "BROKER-ORD-11", 0.25d).envelope();
+
+        registry.absorb(List.of(submittedEvent));
+
+        assertEquals(IntentPhase.SUBMITTED, registry.getPhase(correlationId).orElseThrow());
+        assertFalse(registry.isTerminated(correlationId));
+    }
+
+    @Test
+    void shouldMarkIntentAsTerminatedOnOrderFilledEvent() {
+        final var journal = new InMemoryEventJournal();
+        final var time = new ControllableTimeProvider(1L, Instant.parse("2026-04-19T08:00:00Z"));
+        final var emitter = new EventEmitter(journal, time, "exec-test-node");
+        final var registry = new IntentRegistry(time, emitter);
+        final UUID intentId = UUID.randomUUID();
+        registry.bind(intentId, CanonicalId.parse("S07:I03:VA07-03:BA01"), "crypto", time.eventTime(), 1000L);
+
+        final var filled = emitter.createEnvelope(
+                EventType.OrderFilledEvent,
+                "BROKER-1",
+                intentId.toString(),
+                CanonicalId.parse("S07:I03:VA07-03:BA01"),
+                "filled".getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                intentId
+        );
+
+        registry.absorb(List.of(filled));
+
+        assertTrue(registry.isTerminated(intentId));
+        assertTrue(registry.getPhase(intentId).isEmpty());
+    }
+
+    @Test
+    void shouldMarkIntentAsTerminatedOnOrderUnknownEvent() {
+        final var journal = new InMemoryEventJournal();
+        final var time = new ControllableTimeProvider(1L, Instant.parse("2026-04-19T08:00:00Z"));
+        final var emitter = new EventEmitter(journal, time, "exec-test-node");
+        final var registry = new IntentRegistry(time, emitter);
+        final UUID intentId = UUID.randomUUID();
+        final CanonicalId canonicalId = CanonicalId.parse("S07:I03:VA07-03:BA01");
+        registry.bind(intentId, canonicalId, "crypto", time.eventTime(), 1000L);
+        final PendingIntent pendingIntent = new PendingIntent(intentId, canonicalId, "crypto", time.eventTime(), 1000L);
+
+        final var unknown = emitter.emitOrderUnknown(pendingIntent, "BROKER_TIMEOUT").envelope();
+        registry.absorb(List.of(unknown));
+
+        assertTrue(registry.isTerminated(intentId));
+        assertTrue(registry.getPhase(intentId).isEmpty());
+    }
+
+    @Test
+    void shouldKeepSubmittedIntentUntilFinalEvent() {
+        final var journal = new InMemoryEventJournal();
+        final var time = new ControllableTimeProvider(1L, Instant.parse("2026-04-19T08:00:00Z"));
+        final var emitter = new EventEmitter(journal, time, "exec-test-node");
+        final var registry = new IntentRegistry(time, emitter);
+        final UUID intentId = UUID.randomUUID();
+        final CanonicalId canonicalId = CanonicalId.parse("S07:I03:VA07-03:BA01");
+        registry.bind(intentId, canonicalId, "crypto", time.eventTime(), 1000L);
+        final PendingIntent pendingIntent = new PendingIntent(intentId, canonicalId, "crypto", time.eventTime(), 1000L);
+
+        final var submitted = emitter.emitOrderSubmitted(pendingIntent, "BROKER-ORD-22", 0.50d).envelope();
+        registry.absorb(List.of(submitted));
+        assertEquals(IntentPhase.SUBMITTED, registry.getPhase(intentId).orElseThrow());
+        assertEquals(1, registry.countInPhase(IntentPhase.SUBMITTED));
+
+        final var filled = emitter.createEnvelope(
+                EventType.OrderFilledEvent,
+                "BROKER-ORD-22",
+                intentId.toString(),
+                canonicalId,
+                "filled".getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                intentId
+        );
+        registry.absorb(List.of(filled));
+        assertTrue(registry.getPhase(intentId).isEmpty());
+        assertEquals(0, registry.countInPhase(IntentPhase.SUBMITTED));
     }
 }

@@ -75,7 +75,7 @@ public final class ExecutionRuntime {
         intentRegistry.absorb(freshEvents);
         processOrderIntents(freshEvents);
 
-        intentRegistry.checkTimeouts();
+        intentRegistry.checkTimeouts(config.brokerTimeout().toMillis());
 
         cycleCounter++;
         if (cycleCounter % config.marginEmitEveryNCycles() == 0) {
@@ -117,17 +117,28 @@ public final class ExecutionRuntime {
                     continue;
                 }
                 final OrderIntent orderIntent = parseOrderIntent(envelope);
+                final String businessAccountId = extractAccountIdFromPayload(envelope);
                 if (currentState == ExecutionState.RUN) {
-                    brokerSession.submit(orderIntent);
-                    intentRegistry.bind(intentId, orderIntent.canonicalId(), config.accountId(), envelope.timestampEvent(), config.orderTimeout().toMillis());
+                    final String brokerOrderId = brokerSession.submit(orderIntent);
+                    final PendingIntent pendingIntent = new PendingIntent(
+                            intentId,
+                            orderIntent.canonicalId(),
+                            businessAccountId,
+                            envelope.timestampEvent(),
+                            config.executionTimeout().toMillis()
+                    );
+                    intentRegistry.bind(intentId, orderIntent.canonicalId(), businessAccountId, envelope.timestampEvent(), config.executionTimeout().toMillis());
+                    eventEmitter.emitOrderSubmitted(pendingIntent, brokerOrderId, orderIntent.volume());
+                    // Aktualizacja fazy synchronicznie po emisji OrderSubmittedEvent.
+                    intentRegistry.markSubmitted(intentId);
                     continue;
                 }
                 if (currentState == ExecutionState.SAFE) {
-                    emitRejected(orderIntent, envelope, RejectReason.SAFE_STATE);
+                    emitRejected(orderIntent, envelope, businessAccountId, RejectReason.SAFE_STATE);
                     continue;
                 }
                 if (currentState == ExecutionState.HALT) {
-                    emitRejected(orderIntent, envelope, RejectReason.HALT_STATE);
+                    emitRejected(orderIntent, envelope, businessAccountId, RejectReason.HALT_STATE);
                     continue;
                 }
             } catch (final Exception exception) {
@@ -139,13 +150,13 @@ public final class ExecutionRuntime {
     }
 
 
-    private void emitRejected(final OrderIntent orderIntent, final EventEnvelope envelope, final RejectReason reason) {
+    private void emitRejected(final OrderIntent orderIntent, final EventEnvelope envelope, final String businessAccountId, final RejectReason reason) {
         final PendingIntent pendingIntent = new PendingIntent(
                 UUID.fromString(Objects.requireNonNull(envelope.localIntentId(), "localIntentId cannot be null")),
                 orderIntent.canonicalId(),
-                config.accountId(),
+                businessAccountId,
                 envelope.timestampEvent(),
-                config.orderTimeout().toMillis()
+                config.executionTimeout().toMillis()
         );
         eventEmitter.emitOrderRejected(pendingIntent, reason);
     }
@@ -164,6 +175,16 @@ public final class ExecutionRuntime {
                 new Instrument(parts[1]),
                 Double.parseDouble(parts[2])
         );
+    }
+
+
+    private String extractAccountIdFromPayload(final EventEnvelope envelope) {
+        final String payloadText = new String(envelope.payload(), StandardCharsets.UTF_8);
+        final String[] parts = payloadText.split("\\|", 3);
+        if (parts.length < 1 || parts[0].isBlank()) {
+            throw new IllegalArgumentException("accountId missing in OrderIntentEvent payload");
+        }
+        return parts[0];
     }
 
     public void markTerminal(final UUID intentId) {
