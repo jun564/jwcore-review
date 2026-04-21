@@ -4,6 +4,8 @@ import org.jwcore.core.time.ControllableTimeProvider;
 import org.jwcore.domain.CanonicalId;
 import org.jwcore.domain.EventType;
 import org.jwcore.domain.RejectReason;
+import org.jwcore.domain.events.OrderRejectedEvent;
+import org.jwcore.domain.events.OrderUnknownEvent;
 import org.jwcore.execution.common.events.Discrepancy;
 import org.jwcore.execution.common.events.RebuildType;
 import org.jwcore.execution.common.runtime.PendingIntent;
@@ -57,12 +59,16 @@ class EventEmitterTest {
         assertEquals(EventType.OrderUnknownEvent, journal.all().get(4).eventType());
         assertEquals(intentId, unknown.envelope().correlationId());
         assertEquals("BROKER_TIMEOUT", unknown.reason());
+        assertEquals("crypto", unknown.accountId());
+        assertEquals("crypto", OrderUnknownEvent.fromPayload(unknown.envelope().payload()).accountId());
 
         final var rejected = emitter.emitOrderRejected(pendingIntent, RejectReason.RISK_LIMIT);
         assertEquals(EventType.OrderRejectedEvent, journal.all().get(5).eventType());
         assertEquals("exec-crypto-1", rejected.envelope().sourceProcessId());
         assertEquals(intentId, rejected.envelope().correlationId());
         assertEquals(RejectReason.RISK_LIMIT, rejected.reason());
+        assertEquals("crypto", rejected.accountId());
+        assertEquals("crypto", OrderRejectedEvent.fromPayload(rejected.envelope().payload()).accountId());
 
         final var rebuilt = emitter.createStateRebuiltEvent(
                 "crypto",

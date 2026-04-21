@@ -121,7 +121,7 @@ public final class EventEmitter {
         Objects.requireNonNull(intent, "intent cannot be null");
         Objects.requireNonNull(reason, "reason cannot be null");
         final Instant now = timeProvider.eventTime();
-        final byte[] payload = String.join("|", intent.intentId().toString(), reason.name(), now.toString())
+        final byte[] payload = String.join("|", intent.accountId(), intent.intentId().toString(), reason.name(), now.toString())
                 .getBytes(StandardCharsets.UTF_8);
         final EventEnvelope envelope = createEnvelope(
                 EventType.OrderRejectedEvent,
@@ -132,7 +132,7 @@ public final class EventEmitter {
                 intent.intentId()
         );
         emit(envelope);
-        return new OrderRejectedEvent(intent.intentId().toString(), reason, now, envelope);
+        return new OrderRejectedEvent(intent.accountId(), intent.intentId().toString(), reason, now, envelope);
     }
 
 
@@ -183,7 +183,7 @@ public final class EventEmitter {
             throw new IllegalArgumentException("reason cannot be blank");
         }
         final Instant now = timeProvider.eventTime();
-        final byte[] payload = String.join("|", intent.intentId().toString(), reason, now.toString())
+        final byte[] payload = String.join("|", intent.accountId(), intent.intentId().toString(), reason, now.toString())
                 .getBytes(StandardCharsets.UTF_8);
         final EventEnvelope envelope = createEnvelope(
                 EventType.OrderUnknownEvent,
@@ -194,7 +194,7 @@ public final class EventEmitter {
                 intent.intentId()
         );
         emit(envelope);
-        return new OrderUnknownEvent(intent.intentId().toString(), reason, now, envelope);
+        return new OrderUnknownEvent(intent.accountId(), intent.intentId().toString(), reason, now, envelope);
     }
 
     public EventProcessingFailedEvent emitEventProcessingFailed(final UUID failedEventId, final Throwable exception) {

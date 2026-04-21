@@ -66,7 +66,9 @@ class ExecutionRuntimeTest {
                 .toList();
         assertEquals(1, unknownEvents.size());
         assertEquals(intentId, unknownEvents.get(0).correlationId());
-        assertEquals("BROKER_TIMEOUT", new String(unknownEvents.get(0).payload(), StandardCharsets.UTF_8).split("\\|", 3)[1]);
+        final String[] unknownPayload = new String(unknownEvents.get(0).payload(), StandardCharsets.UTF_8).split("\\|", 4);
+        assertEquals("crypto-account", unknownPayload[0]);
+        assertEquals("BROKER_TIMEOUT", unknownPayload[2]);
     }
 
     @Test
@@ -136,6 +138,7 @@ class ExecutionRuntimeTest {
         assertEquals(1, rejectedEvents.size());
         final EventEnvelope rejected = rejectedEvents.get(0);
         assertEquals("SAFE_STATE", extractRejectReasonCode(rejected));
+        assertEquals("crypto-account", extractAccountId(rejected));
         assertEquals(rejectedIntentId, rejected.correlationId());
         assertEquals("crypto-execution-node-test", rejected.sourceProcessId());
 
@@ -171,6 +174,7 @@ class ExecutionRuntimeTest {
         assertEquals(1, rejectedEvents.size());
         final EventEnvelope rejected = rejectedEvents.get(0);
         assertEquals("HALT_STATE", extractRejectReasonCode(rejected));
+        assertEquals("crypto-account", extractAccountId(rejected));
         assertEquals(rejectedIntentId, rejected.correlationId());
         assertEquals("crypto-execution-node-test", rejected.sourceProcessId());
 
@@ -365,7 +369,11 @@ class ExecutionRuntimeTest {
     }
 
     private static String extractRejectReasonCode(final EventEnvelope envelope) {
-        return new String(envelope.payload(), StandardCharsets.UTF_8).split("\\|", 3)[1];
+        return new String(envelope.payload(), StandardCharsets.UTF_8).split("\\|", 4)[2];
+    }
+
+    private static String extractAccountId(final EventEnvelope envelope) {
+        return new String(envelope.payload(), StandardCharsets.UTF_8).split("\\|", 4)[0];
     }
 
     private static UUID extractFailedEventId(final EventEnvelope envelope) {
