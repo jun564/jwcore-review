@@ -5,55 +5,77 @@ import org.jwcore.domain.EventType;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RiskCoordinatorTailerTest {
     @Test
-    void shouldStartReceiveEventsAndClose() {
+    void shouldRebuildAllEventsFromJournalUntilEof() {
         final var business = new InMemoryEventJournal();
         final var market = new InMemoryEventJournal();
-        final var tailer = new RiskCoordinatorTailer(business, market, 100);
-
-        tailer.start();
-        assertTrue(tailer.started());
-
         business.append(event(EventType.MarginUpdateEvent));
         market.append(event(EventType.OrderTimeoutEvent));
+        final var tailer = new RiskCoordinatorTailer(business, market);
+        final List<EventEnvelope> consumed = new ArrayList<>();
 
-        assertEquals(2, tailer.received().size());
-        tailer.close();
-        assertFalse(tailer.started());
+        tailer.rebuild(consumed::add);
+
+        assertEquals(2, consumed.size());
     }
 
     @Test
-    void shouldBoundReceivedEnvelopes() {
+    void shouldPollOnlyNewEventsAfterRebuild() {
         final var business = new InMemoryEventJournal();
         final var market = new InMemoryEventJournal();
-        final var tailer = new RiskCoordinatorTailer(business, market, 3);
+        final EventEnvelope first = event(EventType.MarginUpdateEvent);
+        business.append(first);
+        final var tailer = new RiskCoordinatorTailer(business, market);
+        tailer.rebuild(e -> { });
 
-        tailer.start();
+        final EventEnvelope second = event(EventType.OrderTimeoutEvent);
+        market.append(second);
+
+        final List<EventEnvelope> consumed = new ArrayList<>();
+        tailer.pollSince(consumed::add);
+
+        assertEquals(List.of(second), consumed);
+    }
+
+    @Test
+    void shouldNotBlockWhenNoNewEvents() {
+        final var business = new InMemoryEventJournal();
+        final var market = new InMemoryEventJournal();
+        final var tailer = new RiskCoordinatorTailer(business, market);
+        tailer.rebuild(e -> { });
+
+        final List<EventEnvelope> consumed = new ArrayList<>();
+        tailer.pollSince(consumed::add);
+
+        assertTrue(consumed.isEmpty());
+    }
+
+    @Test
+    void shouldNotDoubleCountEventsAcrossRebuildAndPollSince() {
+        final var business = new InMemoryEventJournal();
+        final var market = new InMemoryEventJournal();
         final EventEnvelope first = event(EventType.MarginUpdateEvent);
         final EventEnvelope second = event(EventType.OrderTimeoutEvent);
-        final EventEnvelope third = event(EventType.MarginUpdateEvent);
-        final EventEnvelope fourth = event(EventType.OrderTimeoutEvent);
-        final EventEnvelope fifth = event(EventType.MarginUpdateEvent);
-
         business.append(first);
-        business.append(second);
-        market.append(third);
-        market.append(fourth);
-        business.append(fifth);
+        market.append(second);
 
-        final List<EventEnvelope> received = tailer.received();
-        assertEquals(3, received.size());
-        assertEquals(List.of(third, fourth, fifth), received);
+        final var tailer = new RiskCoordinatorTailer(business, market);
+        final List<EventEnvelope> rebuild = new ArrayList<>();
+        tailer.rebuild(rebuild::add);
 
-        tailer.close();
+        final List<EventEnvelope> polled = new ArrayList<>();
+        tailer.pollSince(polled::add);
+
+        assertEquals(2, rebuild.size());
+        assertTrue(polled.isEmpty());
     }
 
     private static EventEnvelope event(final EventType eventType) {

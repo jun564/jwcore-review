@@ -35,7 +35,8 @@ class EventEmitterTest {
         assertEquals(EventType.RiskDecisionEvent, journal.all().get(0).eventType());
         assertEquals(ExecutionState.HALT, emitter.parseRiskDecisionEvent(risk.envelope()).desiredState());
         assertEquals("exec-crypto-1", risk.envelope().sourceProcessId());
-        assertEquals(risk.envelope().eventId(), risk.envelope().correlationId());
+        assertNull(risk.envelope().correlationId());
+        assertEquals("risk-decision:crypto:HALT:risk breach", risk.envelope().idempotencyKey());
 
         final var margin = emitter.createMarginUpdateEvent("crypto", new BigDecimal("50"), new BigDecimal("1000"), new BigDecimal("1200"));
         emitter.emit(margin.envelope());
