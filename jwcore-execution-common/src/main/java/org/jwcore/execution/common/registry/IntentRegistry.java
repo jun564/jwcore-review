@@ -34,6 +34,11 @@ public final class IntentRegistry {
     }
 
     public void bind(final UUID intentId, final CanonicalId canonicalId, final String accountId, final Instant emittedAt, final long timeoutThresholdMs) {
+        final IntentPhase currentPhase = intentPhases.get(intentId);
+        if (currentPhase == IntentPhase.SUBMITTED || currentPhase == IntentPhase.TERMINATED) {
+            byCanonicalId.putIfAbsent(canonicalId, intentId);
+            return;
+        }
         final PendingIntent pendingIntent = new PendingIntent(intentId, canonicalId, accountId, emittedAt, timeoutThresholdMs);
         byIntentId.put(intentId, pendingIntent);
         byCanonicalId.put(canonicalId, intentId);
@@ -88,6 +93,12 @@ public final class IntentRegistry {
         for (final UUID intentId : toTimeoutPending) {
             final PendingIntent pendingIntent = byIntentId.get(intentId);
             if (pendingIntent == null) {
+                continue;
+            }
+            if (intentPhases.getOrDefault(intentId, IntentPhase.PENDING_SUBMIT) != IntentPhase.PENDING_SUBMIT) {
+                continue;
+            }
+            if (submittedAtByIntentId.containsKey(intentId)) {
                 continue;
             }
             final OrderTimeoutEvent event = eventEmitter.createOrderTimeoutEvent(pendingIntent);

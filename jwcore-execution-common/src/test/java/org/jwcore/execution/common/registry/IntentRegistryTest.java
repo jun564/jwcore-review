@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -182,4 +183,68 @@ class IntentRegistryTest {
         assertTrue(registry.getPhase(intentId).isEmpty());
         assertEquals(0, registry.countInPhase(IntentPhase.SUBMITTED));
     }
+
+    @Test
+    void shouldNotResetPhaseToPendingSubmitOnRebindWhenSubmitted() {
+        final var journal = new InMemoryEventJournal();
+        final var time = new ControllableTimeProvider(1L, Instant.parse("2026-04-19T08:00:00Z"));
+        final var emitter = new EventEmitter(journal, time, "exec-test-node");
+        final var registry = new IntentRegistry(time, emitter);
+        final UUID intentId = UUID.randomUUID();
+        final CanonicalId canonicalId = CanonicalId.parse("S07:I03:VA07-03:BA01");
+
+        registry.bind(intentId, canonicalId, "crypto", time.eventTime(), 1000L);
+        registry.markSubmitted(intentId);
+        registry.bind(intentId, canonicalId, "crypto", time.eventTime(), 1000L);
+
+        assertEquals(IntentPhase.SUBMITTED, registry.getPhase(intentId).orElseThrow());
+
+        time.advanceBy(Duration.ofSeconds(31));
+        registry.checkTimeouts(30_000L);
+        assertTrue(journal.all().stream().anyMatch(event -> event.eventType() == EventType.OrderUnknownEvent));
+    }
+
+    @Test
+    void shouldNotResetPhaseOnRebindWhenTerminated() {
+        final var journal = new InMemoryEventJournal();
+        final var time = new ControllableTimeProvider(1L, Instant.parse("2026-04-19T08:00:00Z"));
+        final var emitter = new EventEmitter(journal, time, "exec-test-node");
+        final var registry = new IntentRegistry(time, emitter);
+        final UUID intentId = UUID.randomUUID();
+        final CanonicalId canonicalId = CanonicalId.parse("S07:I03:VA07-03:BA01");
+
+        registry.bind(intentId, canonicalId, "crypto", time.eventTime(), 1000L);
+        registry.markTerminated(intentId);
+        registry.bind(intentId, canonicalId, "crypto", time.eventTime(), 1000L);
+
+        assertTrue(registry.isTerminated(intentId));
+    }
+
+    @Test
+    void shouldSkipExecutionTimeoutIfPhaseChangedToSubmittedDuringCheck() throws Exception {
+        final var journal = new InMemoryEventJournal();
+        final var time = new ControllableTimeProvider(1L, Instant.parse("2026-04-19T08:00:00Z"));
+        final var emitter = new EventEmitter(journal, time, "exec-test-node");
+        final var registry = new IntentRegistry(time, emitter);
+        final UUID intentId = UUID.randomUUID();
+        final CanonicalId canonicalId = CanonicalId.parse("S07:I03:VA07-03:BA01");
+
+        registry.bind(intentId, canonicalId, "crypto", time.eventTime(), 1000L);
+        @SuppressWarnings("unchecked")
+        final Map<UUID, Instant> submittedAtByIntentId = (Map<UUID, Instant>) getField(registry, "submittedAtByIntentId");
+        submittedAtByIntentId.put(intentId, time.eventTime());
+
+        time.advanceBy(Duration.ofSeconds(2));
+        registry.checkTimeouts(30_000L);
+
+        assertEquals(IntentPhase.PENDING_SUBMIT, registry.getPhase(intentId).orElseThrow());
+        assertTrue(journal.all().stream().noneMatch(event -> event.eventType() == EventType.OrderTimeoutEvent));
+    }
+
+    private static Object getField(final IntentRegistry registry, final String fieldName) throws Exception {
+        final var field = IntentRegistry.class.getDeclaredField(fieldName);
+        field.setAccessible(true);
+        return field.get(registry);
+    }
+
 }
