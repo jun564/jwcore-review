@@ -220,6 +220,15 @@ Jak 3.2, plus:
 
 ---
 
+### DŁUG-308 — Jeden executor CQ dla dwóch kolejek w adapterze Chronicle Queue
+- Problem został zidentyfikowany po pierwszej paczce 3.1/3.1.1
+- Rozszerzenie ADR-006 wymaga osobnego executora per kolejka (`events-business`, `market-data`)
+- **Status:** ZAMKNIĘTY w tej paczce naprawczej
+- `ChronicleQueueEventJournal.tail()` używa teraz:
+  - osobnego executora dla `events-business`
+  - osobnego executora dla `market-data`
+  - osobnego lekkiego dispatchera do uporządkowanego dostarczenia eventów do konsumenta
+
 ## Mapa długu → iteracja
 
 | Dług | Iteracja naprawcza |
@@ -259,3 +268,12 @@ Jak 3.2, plus:
 - **Etap 1 zamknięty:** początek czerwca 2026
 
 Szacunek przy założeniu 5h/dobę dostępności Architekta i sprawnej komunikacji z GPT w nowym czacie. Rewizja po 3.1.
+
+### DŁUG-310 — CQ 5.25ea16 `.toEnd()` na pustej kolejce pomija pierwszy wpis
+- `.toEnd()` wywołane na pustej `ChronicleQueue` (wersja 5.25ea16 early access) powoduje,
+  że tailer nigdy nie widzi pierwszego wpisu dodanego po subskrypcji.
+- **Obejście (3.1.1):** warunkowe `.toEnd()` — wywoływane tylko gdy `entryCount() > 0`.
+  API: `SingleChronicleQueue.entryCount()` potwierdzone przez `javap` na jarze 5.25ea16.
+- **Docelowe rozwiązanie:** przy aktualizacji CQ do wersji stabilnej (≥5.24.x lub ≥5.26)
+  zweryfikować czy bug nadal występuje i usunąć obejście jeśli naprawione upstream.
+- **Adresowane w:** 3.1.1 (obejście), potencjalnie usunięte w 3.2 lub 3.3 przy aktualizacji CQ.

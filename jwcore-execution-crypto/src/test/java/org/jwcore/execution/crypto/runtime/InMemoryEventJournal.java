@@ -1,0 +1,22 @@
+package org.jwcore.execution.crypto.runtime;
+
+import org.jwcore.core.ports.IEventJournal;
+import org.jwcore.core.ports.TailSubscription;
+import org.jwcore.domain.EventEnvelope;
+
+import java.time.Instant;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.Consumer;
+
+final class InMemoryEventJournal implements IEventJournal {
+    private final List<EventEnvelope> events = new CopyOnWriteArrayList<>();
+    private final List<Consumer<EventEnvelope>> tails = new CopyOnWriteArrayList<>();
+
+    @Override public void append(final EventEnvelope envelope) { events.add(envelope); tails.forEach(t -> t.accept(envelope)); }
+    @Override public List<EventEnvelope> read(final Instant fromInclusive, final Instant toExclusive) {
+        return events.stream().filter(e -> !e.timestampEvent().isBefore(fromInclusive) && e.timestampEvent().isBefore(toExclusive)).toList();
+    }
+    @Override public TailSubscription tail(final Consumer<EventEnvelope> consumer) { tails.add(consumer); return () -> tails.remove(consumer); }
+    public List<EventEnvelope> all() { return List.copyOf(events); }
+}
