@@ -21,6 +21,9 @@ public final class ExecutionPropertiesLoader {
         final long tickIntervalMs = parsePositiveLong(properties, "tick.interval.ms", 100L);
         final int processedEventsCapacity = parsePositiveInt(properties, "processed.events.capacity", 100000);
         final String nodeId = Objects.requireNonNull(properties.getProperty("nodeId"), "nodeId cannot be null");
+        if (nodeId.isBlank()) {
+            throw new IllegalStateException("nodeId must not be blank");
+        }
 
         if (brokerTimeoutMs < executionTimeoutMs) {
             throw new IllegalArgumentException("broker.timeout.ms must be >= execution.timeout.ms");

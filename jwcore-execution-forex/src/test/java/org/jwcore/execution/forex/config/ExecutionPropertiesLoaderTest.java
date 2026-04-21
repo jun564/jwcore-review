@@ -37,4 +37,18 @@ class ExecutionPropertiesLoaderTest {
         assertThrows(IllegalArgumentException.class,
                 () -> new ExecutionPropertiesLoader().load(new ByteArrayInputStream(content.getBytes(StandardCharsets.UTF_8)), "default"));
     }
+
+    @Test
+    void shouldThrowWhenNodeIdIsBlank() {
+        final String content = "nodeId=\n";
+        assertThrows(IllegalStateException.class,
+                () -> new ExecutionPropertiesLoader().load(new ByteArrayInputStream(content.getBytes(StandardCharsets.UTF_8)), "default"));
+    }
+
+    @Test
+    void shouldThrowWhenNodeIdIsWhitespace() {
+        final String content = "nodeId=   \n";
+        assertThrows(IllegalStateException.class,
+                () -> new ExecutionPropertiesLoader().load(new ByteArrayInputStream(content.getBytes(StandardCharsets.UTF_8)), "default"));
+    }
 }
