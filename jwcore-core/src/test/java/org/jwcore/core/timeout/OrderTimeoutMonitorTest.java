@@ -197,7 +197,7 @@ class OrderTimeoutMonitorTest {
         }
     }
 
-    private static final class InMemoryJournal implements IEventJournal {
+    private static class InMemoryJournal implements IEventJournal {
         private final List<EventEnvelope> events = new CopyOnWriteArrayList<>();
         private final AtomicLong sequence = new AtomicLong(0L);
 
