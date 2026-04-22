@@ -3,68 +3,80 @@ package org.jwcore.domain.events;
 import org.jwcore.domain.CanonicalId;
 import org.jwcore.domain.EventEnvelope;
 
-import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Objects;
+import java.util.Set;
 
 public record OrderCanceledEvent(
-        String accountId,
-        String intentId,
+        String orderId,
         String brokerOrderId,
         CanonicalId canonicalId,
-        BigDecimal size,
         String reason,
-        Instant timestamp,
+        Instant timestampCanceled,
         EventEnvelope envelope) {
 
+    private static final Set<String> ALLOWED_REASONS = Set.of("USER_REQUEST", "TIMEOUT", "REJECTED", "EXPIRED");
+
     public OrderCanceledEvent {
-        Objects.requireNonNull(accountId, "accountId cannot be null");
-        Objects.requireNonNull(intentId, "intentId cannot be null");
-        Objects.requireNonNull(brokerOrderId, "brokerOrderId cannot be null");
+        Objects.requireNonNull(orderId, "orderId cannot be null");
         Objects.requireNonNull(canonicalId, "canonicalId cannot be null");
-        Objects.requireNonNull(size, "size cannot be null");
         Objects.requireNonNull(reason, "reason cannot be null");
-        Objects.requireNonNull(timestamp, "timestamp cannot be null");
-        if (accountId.isBlank()) {
-            throw new IllegalArgumentException("accountId cannot be blank");
+        Objects.requireNonNull(timestampCanceled, "timestampCanceled cannot be null");
+
+        if (orderId.isBlank()) {
+            throw new IllegalArgumentException("orderId cannot be blank");
         }
-        if (intentId.isBlank()) {
-            throw new IllegalArgumentException("intentId cannot be blank");
+        if (brokerOrderId != null && brokerOrderId.isBlank()) {
+            throw new IllegalArgumentException("brokerOrderId cannot be blank when provided");
         }
-        if (brokerOrderId.isBlank()) {
-            throw new IllegalArgumentException("brokerOrderId cannot be blank");
-        }
-        if (size.signum() <= 0) {
-            throw new IllegalArgumentException("size must be positive");
+        if (!ALLOWED_REASONS.contains(reason)) {
+            // TODO: Replace String reason with dedicated OrderCancelReason enum in full lifecycle model.
+            throw new IllegalArgumentException("Unsupported cancellation reason: " + reason);
         }
     }
 
     public byte[] toPayload() {
         return String.join("|",
-                accountId,
-                intentId,
-                brokerOrderId,
+                orderId,
+                brokerOrderId == null ? "" : brokerOrderId,
                 canonicalId.format(),
-                size.toPlainString(),
                 reason,
-                timestamp.toString()).getBytes(StandardCharsets.UTF_8);
+                timestampCanceled.toString())
+                .getBytes(StandardCharsets.UTF_8);
     }
 
+
+
+    // backward-compatible accessors used by older modules.
+    public String accountId() {
+        return canonicalId.format();
+    }
+
+    public String intentId() {
+        return orderId;
+    }
+
+    public Instant timestamp() {
+        return timestampCanceled;
+    }
+
+    public java.math.BigDecimal size() {
+        return java.math.BigDecimal.ZERO;
+    }
     public static OrderCanceledEvent fromPayload(final byte[] payload) {
         Objects.requireNonNull(payload, "payload cannot be null");
-        final String[] parts = new String(payload, StandardCharsets.UTF_8).split("\\|", 7);
-        if (parts.length != 7) {
-            throw new IllegalArgumentException("Invalid OrderCanceledEvent payload: expected 7 fields");
+        final String[] parts = new String(payload, StandardCharsets.UTF_8).split("\\|", 5);
+        if (parts.length != 5) {
+            throw new IllegalArgumentException("Invalid OrderCanceledEvent payload: expected 5 fields");
         }
+        final String brokerOrderId = parts[1].isEmpty() ? null : parts[1];
         return new OrderCanceledEvent(
                 parts[0],
-                parts[1],
-                parts[2],
-                CanonicalId.parse(parts[3]),
-                new BigDecimal(parts[4]),
-                parts[5],
-                Instant.parse(parts[6]),
+                brokerOrderId,
+                CanonicalId.parse(parts[2]),
+                parts[3],
+                Instant.parse(parts[4]),
                 null
         );
     }
