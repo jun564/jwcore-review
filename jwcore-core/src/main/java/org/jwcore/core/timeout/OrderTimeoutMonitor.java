@@ -8,7 +8,12 @@ import org.jwcore.domain.IdempotencyKeys;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.UUID;
 
 public final class OrderTimeoutMonitor {
     private static final byte TIMEOUT_PAYLOAD_VERSION = 1;
@@ -29,7 +34,7 @@ public final class OrderTimeoutMonitor {
         }
     }
 
-    public void registerPending(final EventEnvelope orderIntentEvent) {
+    public synchronized void registerPending(final EventEnvelope orderIntentEvent) {
         Objects.requireNonNull(orderIntentEvent, "orderIntentEvent cannot be null");
         if (orderIntentEvent.eventType() != EventType.OrderIntentEvent) {
             throw new IllegalArgumentException("Only OrderIntentEvent can be registered as pending");
@@ -41,29 +46,33 @@ public final class OrderTimeoutMonitor {
         pendingByLocalIntentId.put(orderIntentEvent.localIntentId(), new PendingIntent(orderIntentEvent, deadline));
     }
 
-    public boolean markTerminal(final String localIntentId) {
+    public synchronized boolean markTerminal(final String localIntentId) {
         Objects.requireNonNull(localIntentId, "localIntentId cannot be null");
         return pendingByLocalIntentId.remove(localIntentId) != null;
     }
 
     public List<EventEnvelope> scanTimeouts() {
-        final long now = timeProvider.monotonicTime();
-        final List<EventEnvelope> timedOut = new ArrayList<>();
-        final Iterator<Map.Entry<String, PendingIntent>> iterator = pendingByLocalIntentId.entrySet().iterator();
-        while (iterator.hasNext()) {
-            final Map.Entry<String, PendingIntent> entry = iterator.next();
-            final PendingIntent pendingIntent = entry.getValue();
-            if (now >= pendingIntent.deadlineNanos()) {
-                final EventEnvelope timeoutEvent = timeoutEventFor(pendingIntent.originalEvent());
-                eventJournal.append(timeoutEvent);
-                timedOut.add(timeoutEvent);
-                iterator.remove();
-            }
+        final List<EventEnvelope> timedOut;
+        synchronized (this) {
+            final long now = timeProvider.monotonicTime();
+            timedOut = new ArrayList<>();
+            pendingByLocalIntentId.entrySet().removeIf(entry -> {
+                final PendingIntent pendingIntent = entry.getValue();
+                if (now < pendingIntent.deadlineNanos()) {
+                    return false;
+                }
+                timedOut.add(timeoutEventFor(pendingIntent.originalEvent()));
+                return true;
+            });
+        }
+
+        for (final EventEnvelope timeoutEvent : timedOut) {
+            eventJournal.append(timeoutEvent);
         }
         return List.copyOf(timedOut);
     }
 
-    public int pendingCount() {
+    public synchronized int pendingCount() {
         return pendingByLocalIntentId.size();
     }
 

@@ -4,6 +4,7 @@ import org.jwcore.domain.CanonicalId;
 import org.jwcore.domain.EventEnvelope;
 import org.jwcore.domain.EventType;
 import org.jwcore.domain.IdempotencyKeys;
+import org.jwcore.domain.OrderSide;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
@@ -20,50 +21,55 @@ class OrderFilledEventTest {
 
     @Test
     void shouldCreateValidEvent() {
-        final var event = new OrderFilledEvent("acc-1", "intent-1", "BROKER-1", canonicalId(), new BigDecimal("0.10000000"), timestamp(), envelope());
-        assertEquals("acc-1", event.accountId());
+        final var event = validEvent(null);
+        assertEquals("order-1", event.orderId());
     }
 
     @Test
-    void shouldRejectBlankAccountId() {
-        assertThrows(IllegalArgumentException.class, () -> new OrderFilledEvent(" ", "intent-1", "BROKER-1", canonicalId(), new BigDecimal("0.1"), timestamp(), envelope()));
-    }
-
-    @Test
-    void shouldRejectBlankIntentId() {
-        assertThrows(IllegalArgumentException.class, () -> new OrderFilledEvent("acc-1", " ", "BROKER-1", canonicalId(), new BigDecimal("0.1"), timestamp(), envelope()));
+    void shouldAllowNullBrokerOrderId() {
+        final var event = validEvent(null);
+        assertNull(event.brokerOrderId());
     }
 
     @Test
     void shouldRejectBlankBrokerOrderId() {
-        assertThrows(IllegalArgumentException.class, () -> new OrderFilledEvent("acc-1", "intent-1", " ", canonicalId(), new BigDecimal("0.1"), timestamp(), envelope()));
+        assertThrows(IllegalArgumentException.class, () -> validEvent(" "));
     }
 
     @Test
-    void shouldRejectNegativeOrZeroSize() {
-        assertThrows(IllegalArgumentException.class, () -> new OrderFilledEvent("acc-1", "intent-1", "BROKER-1", canonicalId(), BigDecimal.ZERO, timestamp(), envelope()));
-        assertThrows(IllegalArgumentException.class, () -> new OrderFilledEvent("acc-1", "intent-1", "BROKER-1", canonicalId(), new BigDecimal("-0.1"), timestamp(), envelope()));
+    void shouldValidatePositiveFields() {
+        assertThrows(IllegalArgumentException.class, () -> new OrderFilledEvent("order-1", null, canonicalId(), OrderSide.BUY,
+                BigDecimal.ZERO, new BigDecimal("1"), BigDecimal.ZERO, timestamp(), BigDecimal.ZERO, envelope()));
+        assertThrows(IllegalArgumentException.class, () -> new OrderFilledEvent("order-1", null, canonicalId(), OrderSide.BUY,
+                new BigDecimal("1"), BigDecimal.ZERO, BigDecimal.ZERO, timestamp(), BigDecimal.ZERO, envelope()));
+        assertThrows(IllegalArgumentException.class, () -> new OrderFilledEvent("order-1", null, canonicalId(), OrderSide.BUY,
+                new BigDecimal("1"), new BigDecimal("1"), new BigDecimal("-0.01"), timestamp(), BigDecimal.ZERO, envelope()));
+        assertThrows(IllegalArgumentException.class, () -> new OrderFilledEvent("order-1", null, canonicalId(), OrderSide.BUY,
+                new BigDecimal("1"), new BigDecimal("1"), BigDecimal.ZERO, timestamp(), new BigDecimal("-0.01"), envelope()));
     }
 
     @Test
     void shouldSerializeAndDeserializePayload() {
-        final var event = new OrderFilledEvent("acc-1", "intent-1", "BROKER-1", canonicalId(), new BigDecimal("0.10000000"), timestamp(), envelope());
+        final var event = validEvent("BROKER-1");
         final var parsed = OrderFilledEvent.fromPayload(event.toPayload());
 
-        assertEquals(event.accountId(), parsed.accountId());
-        assertEquals(event.intentId(), parsed.intentId());
+        assertEquals(event.orderId(), parsed.orderId());
         assertEquals(event.brokerOrderId(), parsed.brokerOrderId());
         assertEquals(event.canonicalId(), parsed.canonicalId());
-        assertEquals(event.size(), parsed.size());
-        assertEquals(event.timestamp(), parsed.timestamp());
+        assertEquals(event.side(), parsed.side());
+        assertEquals(event.filledQuantity(), parsed.filledQuantity());
+        assertEquals(event.averagePrice(), parsed.averagePrice());
+        assertEquals(event.commission(), parsed.commission());
+        assertEquals(event.timestampFilled(), parsed.timestampFilled());
+        assertEquals(event.remainingQuantity(), parsed.remainingQuantity());
         assertNull(parsed.envelope());
     }
 
     @Test
     void shouldSerializeBigDecimalWithoutScientificNotation() {
-        final var event = new OrderFilledEvent("acc-1", "intent-1", "BROKER-1", canonicalId(), new BigDecimal("0.00000001"), timestamp(), envelope());
+        final var event = validEvent("BROKER-1");
         final String payload = new String(event.toPayload(), StandardCharsets.UTF_8);
-        assertTrue(payload.contains("|0.00000001|"));
+        assertTrue(payload.contains("|0.10000000|"));
     }
 
     @Test
@@ -71,7 +77,22 @@ class OrderFilledEventTest {
         final var exception = assertThrows(IllegalArgumentException.class,
                 () -> OrderFilledEvent.fromPayload("a|b|c".getBytes(StandardCharsets.UTF_8)));
         assertTrue(exception.getMessage().contains("OrderFilledEvent"));
-        assertTrue(exception.getMessage().contains("expected 6 fields"));
+        assertTrue(exception.getMessage().contains("expected 9 fields"));
+    }
+
+    private static OrderFilledEvent validEvent(final String brokerOrderId) {
+        return new OrderFilledEvent(
+                "order-1",
+                brokerOrderId,
+                canonicalId(),
+                OrderSide.BUY,
+                new BigDecimal("0.10000000"),
+                new BigDecimal("123.45"),
+                new BigDecimal("0.05"),
+                timestamp(),
+                BigDecimal.ZERO,
+                envelope()
+        );
     }
 
     private static Instant timestamp() {
@@ -88,7 +109,7 @@ class OrderFilledEventTest {
                 UUID.randomUUID(),
                 EventType.OrderFilledEvent,
                 "BROKER-1",
-                "intent-1",
+                "order-1",
                 canonicalId(),
                 IdempotencyKeys.generate("BROKER-1", EventType.OrderFilledEvent, payload),
                 1L,
