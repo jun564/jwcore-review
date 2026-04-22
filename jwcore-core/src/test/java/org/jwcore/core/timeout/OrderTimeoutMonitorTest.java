@@ -11,8 +11,10 @@ import org.junit.jupiter.api.Test;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -64,10 +66,13 @@ class OrderTimeoutMonitorTest {
 
     private static final class InMemoryJournal implements IEventJournal {
         private final List<EventEnvelope> events = new ArrayList<>();
+        private final AtomicLong sequence = new AtomicLong(0L);
 
         @Override
-        public void append(final EventEnvelope envelope) {
-            events.add(envelope);
+        public long append(final EventEnvelope envelope) {
+            final long next = sequence.incrementAndGet();
+            events.add(withSequence(envelope, next));
+            return next;
         }
 
         @Override
@@ -76,8 +81,26 @@ class OrderTimeoutMonitorTest {
         }
 
         @Override
+        public long currentSequence() {
+            return sequence.get();
+        }
+
+        @Override
+        public List<EventEnvelope> readAfterSequence(final long since) {
+            return events.stream().filter(e -> e.timestampMono() > since)
+                    .sorted(Comparator.comparingLong(EventEnvelope::timestampMono))
+                    .toList();
+        }
+
+        @Override
         public TailSubscription tail(final Consumer<EventEnvelope> consumer) {
             return () -> { };
+        }
+
+        private static EventEnvelope withSequence(final EventEnvelope envelope, final long seq) {
+            return new EventEnvelope(envelope.eventId(), envelope.eventType(), envelope.brokerOrderId(), envelope.localIntentId(),
+                    envelope.canonicalId(), envelope.idempotencyKey(), seq, envelope.timestampEvent(), envelope.payloadVersion(),
+                    envelope.payload(), envelope.sourceProcessId(), envelope.correlationId());
         }
     }
 

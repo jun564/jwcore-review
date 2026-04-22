@@ -25,6 +25,7 @@ import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -120,16 +121,31 @@ class MainTest {
 
     private static final class RecordingJournal implements IEventJournal {
         private final List<EventEnvelope> events = new CopyOnWriteArrayList<>();
+        private final AtomicLong sequence = new AtomicLong(0L);
 
         @Override
-        public void append(final EventEnvelope envelope) {
-            events.add(envelope);
+        public long append(final EventEnvelope envelope) {
+            final long next = sequence.incrementAndGet();
+            events.add(withSequence(envelope, next));
+            return next;
         }
 
         @Override
         public List<EventEnvelope> read(final Instant fromInclusive, final Instant toExclusive) {
             return events.stream()
                     .filter(e -> !e.timestampEvent().isBefore(fromInclusive) && e.timestampEvent().isBefore(toExclusive))
+                    .toList();
+        }
+
+        @Override
+        public long currentSequence() {
+            return sequence.get();
+        }
+
+        @Override
+        public List<EventEnvelope> readAfterSequence(final long since) {
+            return events.stream().filter(e -> e.timestampMono() > since)
+                    .sorted(java.util.Comparator.comparingLong(EventEnvelope::timestampMono))
                     .toList();
         }
 
@@ -146,6 +162,12 @@ class MainTest {
                 }
             }
             return result;
+        }
+
+        private static EventEnvelope withSequence(final EventEnvelope envelope, final long seq) {
+            return new EventEnvelope(envelope.eventId(), envelope.eventType(), envelope.brokerOrderId(), envelope.localIntentId(),
+                    envelope.canonicalId(), envelope.idempotencyKey(), seq, envelope.timestampEvent(), envelope.payloadVersion(),
+                    envelope.payload(), envelope.sourceProcessId(), envelope.correlationId());
         }
     }
 }
