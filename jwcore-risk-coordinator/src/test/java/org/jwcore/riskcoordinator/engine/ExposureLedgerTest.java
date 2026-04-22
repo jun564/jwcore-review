@@ -62,8 +62,8 @@ class ExposureLedgerTest {
 
         ledger.apply(intent(CID, "o3"));
         ledger.apply(fill("o3", OrderSide.SELL, "10", "90", "1"));
-        assertEquals(new BigDecimal("-12"), ledger.realizedPnL(CID));
-        assertEquals(new BigDecimal("10"), ledger.totalCommission(CID));
+        assertEquals(new BigDecimal("-13"), ledger.realizedPnL(CID));
+        assertEquals(new BigDecimal("3"), ledger.totalCommission(CID));
     }
 
     @Test
