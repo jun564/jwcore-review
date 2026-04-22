@@ -8,7 +8,7 @@ import java.util.function.Consumer;
 
 public interface IEventJournal {
     /**
-     * Appends event to journal and assigns domain sequence carried in payload ({@code EventEnvelope.timestampMono}).
+     * Appends event to journal and assigns domain sequence carried in payload ({@code EventEnvelope.sequenceNumber}).
      * Invariant: sequence is strictly increasing ({@code next > prev}) but continuity is not guaranteed.
      * Gaps are allowed when write fails after sequence assignment, therefore consumers must use {@code >}
      * comparisons and must not assume {@code next == prev + 1}.
@@ -24,7 +24,7 @@ public interface IEventJournal {
     long currentSequence();
 
     /**
-     * Reads events having payload sequence ({@code EventEnvelope.timestampMono}) strictly greater than provided value.
+     * Reads events having payload sequence ({@code EventEnvelope.sequenceNumber}) strictly greater than provided value.
      * Filtering is based on event payload sequence, not physical position/index in the journal.
      */
     List<EventEnvelope> readAfterSequence(long sequence);

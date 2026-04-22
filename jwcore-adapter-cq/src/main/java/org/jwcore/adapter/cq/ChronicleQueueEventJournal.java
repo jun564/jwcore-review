@@ -98,7 +98,7 @@ public final class ChronicleQueueEventJournal implements IEventJournal, AutoClos
         readQueueAfterSequence(envelopes, businessQueue, sequence, "business");
         readQueueAfterSequence(envelopes, marketDataQueue, sequence, "market-data");
         // TODO DŁUG-317: add index/seek by sequence to optimize from O(n) scan to O(log n) or better.
-        envelopes.sort(Comparator.comparingLong(EventEnvelope::timestampMono).thenComparing(EventEnvelope::eventId));
+        envelopes.sort(Comparator.comparingLong(EventEnvelope::sequenceNumber).thenComparing(EventEnvelope::eventId));
         return List.copyOf(envelopes);
     }
 
@@ -157,10 +157,10 @@ public final class ChronicleQueueEventJournal implements IEventJournal, AutoClos
                 final long index = documentContext.index();
                 try {
                     final EventEnvelope envelope = readEnvelope(documentContext);
-                    if (envelope.timestampMono() > LEGACY_NANOS_THRESHOLD) {
+                    if (envelope.sequenceNumber() > LEGACY_NANOS_THRESHOLD) {
                         throw new IllegalStateException("Legacy journal detected, nie kompatybilny z 3C sequence API");
                     }
-                    max = Math.max(max, envelope.timestampMono());
+                    max = Math.max(max, envelope.sequenceNumber());
                 } catch (final RuntimeException exception) {
                     if (index < lastIndex) {
                         throw new IllegalStateException("Unreadable record detected in the middle of stream for queue "
@@ -252,7 +252,7 @@ public final class ChronicleQueueEventJournal implements IEventJournal, AutoClos
                 final long index = documentContext.index();
                 try {
                     final EventEnvelope envelope = readEnvelope(documentContext);
-                    if (envelope.timestampMono() > sequence) {
+                    if (envelope.sequenceNumber() > sequence) {
                         target.add(envelope);
                     }
                 } catch (final RuntimeException exception) {

@@ -18,7 +18,7 @@ public record EventEnvelope(
         String localIntentId,
         CanonicalId canonicalId,
         String idempotencyKey,
-        long timestampMono,
+        long sequenceNumber,
         Instant timestampEvent,
         byte payloadVersion,
         byte[] payload,
@@ -35,12 +35,12 @@ public record EventEnvelope(
             final String localIntentId,
             final CanonicalId canonicalId,
             final String idempotencyKey,
-            final long timestampMono,
+            final long sequenceNumber,
             final Instant timestampEvent,
             final byte payloadVersion,
             final byte[] payload) {
         this(eventId, eventType, brokerOrderId, localIntentId, canonicalId, idempotencyKey,
-                timestampMono, timestampEvent, payloadVersion, payload, "unknown", eventId);
+                sequenceNumber, timestampEvent, payloadVersion, payload, "unknown", eventId);
     }
 
     public EventEnvelope {
@@ -57,8 +57,8 @@ public record EventEnvelope(
         if (correlationId != null && correlationId.version() != 4) {
             throw new IllegalArgumentException("correlationId must be UUID v4");
         }
-        if (timestampMono < 0L) {
-            throw new IllegalArgumentException("timestampMono cannot be negative");
+        if (sequenceNumber < 0L) {
+            throw new IllegalArgumentException("sequenceNumber cannot be negative");
         }
         if (payloadVersion < 0) {
             throw new IllegalArgumentException("payloadVersion cannot be negative");
@@ -103,7 +103,7 @@ public record EventEnvelope(
             BinaryCodec.writeNullableString(output, localIntentId);
             BinaryCodec.writeNullableString(output, canonicalId == null ? null : canonicalId.format());
             BinaryCodec.writeString(output, idempotencyKey);
-            BinaryCodec.writeLong(output, timestampMono);
+            BinaryCodec.writeLong(output, sequenceNumber);
             BinaryCodec.writeInstant(output, timestampEvent);
             BinaryCodec.writeByte(output, payloadVersion);
             BinaryCodec.writeByteArray(output, payload);
@@ -126,14 +126,14 @@ public record EventEnvelope(
             final String canonicalIdRaw = BinaryCodec.readNullableString(input);
             final CanonicalId canonicalId = canonicalIdRaw == null ? null : CanonicalId.parse(canonicalIdRaw);
             final String idempotencyKey = BinaryCodec.readString(input);
-            final long timestampMono = BinaryCodec.readLong(input);
+            final long sequenceNumber = BinaryCodec.readLong(input);
             final Instant timestampEvent = BinaryCodec.readInstant(input);
             final byte payloadVersion = BinaryCodec.readByte(input);
             final byte[] payload = BinaryCodec.readByteArray(input);
             final String sourceProcessId = input.available() > 0 ? BinaryCodec.readNullableString(input) : null;
             final UUID correlationId = input.available() > 0 ? BinaryCodec.readCompatibleNullableUuid(input) : null;
             return new EventEnvelope(eventId, eventType, brokerOrderId, localIntentId, canonicalId, idempotencyKey,
-                    timestampMono, timestampEvent, payloadVersion, payload, sourceProcessId, correlationId);
+                    sequenceNumber, timestampEvent, payloadVersion, payload, sourceProcessId, correlationId);
         } catch (final IOException exception) {
             throw new IllegalArgumentException("Invalid EventEnvelope binary payload", exception);
         }
@@ -147,7 +147,7 @@ public record EventEnvelope(
         if (!(object instanceof EventEnvelope other)) {
             return false;
         }
-        return timestampMono == other.timestampMono
+        return sequenceNumber == other.sequenceNumber
                 && payloadVersion == other.payloadVersion
                 && eventId.equals(other.eventId)
                 && eventType == other.eventType
@@ -164,7 +164,7 @@ public record EventEnvelope(
     @Override
     public int hashCode() {
         int result = Objects.hash(eventId, eventType, brokerOrderId, localIntentId, canonicalId, idempotencyKey,
-                timestampMono, timestampEvent, payloadVersion, sourceProcessId, correlationId);
+                sequenceNumber, timestampEvent, payloadVersion, sourceProcessId, correlationId);
         result = 31 * result + Arrays.hashCode(payload);
         return result;
     }
