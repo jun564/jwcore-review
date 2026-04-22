@@ -23,15 +23,18 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
 public final class ChronicleQueueEventJournal implements IEventJournal, AutoCloseable {
     private static final long TAIL_IDLE_MILLIS = 25L;
+    private static final long LEGACY_NANOS_THRESHOLD = 1_000_000_000_000_000L;
 
     private final ChronicleQueue businessQueue;
     private final ChronicleQueue marketDataQueue;
     private final ExcerptAppender businessAppender;
     private final ExcerptAppender marketDataAppender;
+    private final AtomicLong sequenceCounter;
 
     public ChronicleQueueEventJournal(final ChronicleQueueJournalConfig config) {
         Objects.requireNonNull(config, "config cannot be null");
@@ -49,18 +52,24 @@ public final class ChronicleQueueEventJournal implements IEventJournal, AutoClos
                 .build();
         this.businessAppender = businessQueue.acquireAppender();
         this.marketDataAppender = marketDataQueue.acquireAppender();
+
+        final long maxSequence = Math.max(scanMaxSequence(businessQueue, "business"), scanMaxSequence(marketDataQueue, "market-data"));
+        this.sequenceCounter = new AtomicLong(maxSequence);
     }
 
     @Override
-    public void append(final EventEnvelope envelope) {
+    public synchronized long append(final EventEnvelope envelope) {
         Objects.requireNonNull(envelope, "envelope cannot be null");
         final ExcerptAppender appender = selectAppender(envelope.eventType());
-        final byte[] serialized = envelope.serialize();
+        final long sequence = sequenceCounter.incrementAndGet();
+        final EventEnvelope canonical = withSequence(envelope, sequence);
+        final byte[] serialized = canonical.serialize();
         try (DocumentContext documentContext = appender.writingDocument()) {
             final Bytes<?> bytes = documentContext.wire().bytes();
             bytes.writeInt(serialized.length);
             bytes.write(serialized);
         }
+        return sequence;
     }
 
     @Override
@@ -75,6 +84,21 @@ public final class ChronicleQueueEventJournal implements IEventJournal, AutoClos
         readQueueInto(envelopes, businessQueue, fromInclusive, toExclusive);
         readQueueInto(envelopes, marketDataQueue, fromInclusive, toExclusive);
         envelopes.sort(Comparator.comparing(EventEnvelope::timestampEvent).thenComparing(EventEnvelope::eventId));
+        return List.copyOf(envelopes);
+    }
+
+    @Override
+    public long currentSequence() {
+        return sequenceCounter.get();
+    }
+
+    @Override
+    public List<EventEnvelope> readAfterSequence(final long sequence) {
+        final List<EventEnvelope> envelopes = new ArrayList<>();
+        readQueueAfterSequence(envelopes, businessQueue, sequence, "business");
+        readQueueAfterSequence(envelopes, marketDataQueue, sequence, "market-data");
+        // TODO DŁUG-317: add index/seek by sequence to optimize from O(n) scan to O(log n) or better.
+        envelopes.sort(Comparator.comparingLong(EventEnvelope::timestampMono).thenComparing(EventEnvelope::eventId));
         return List.copyOf(envelopes);
     }
 
@@ -119,6 +143,33 @@ public final class ChronicleQueueEventJournal implements IEventJournal, AutoClos
         flush();
         businessQueue.close();
         marketDataQueue.close();
+    }
+
+    private static long scanMaxSequence(final ChronicleQueue queue, final String queueName) {
+        final ExcerptTailer tailer = queue.createTailer();
+        final long lastIndex = queue.lastIndex();
+        long max = 0L;
+        while (true) {
+            try (DocumentContext documentContext = tailer.readingDocument()) {
+                if (!documentContext.isPresent()) {
+                    return max;
+                }
+                final long index = documentContext.index();
+                try {
+                    final EventEnvelope envelope = readEnvelope(documentContext);
+                    if (envelope.timestampMono() > LEGACY_NANOS_THRESHOLD) {
+                        throw new IllegalStateException("Legacy journal detected, nie kompatybilny z 3C sequence API");
+                    }
+                    max = Math.max(max, envelope.timestampMono());
+                } catch (final RuntimeException exception) {
+                    if (index < lastIndex) {
+                        throw new IllegalStateException("Unreadable record detected in the middle of stream for queue "
+                                + queueName + " at index " + index, exception);
+                    }
+                    return max;
+                }
+            }
+        }
     }
 
     private static void pollTailer(final AtomicBoolean running,
@@ -188,6 +239,30 @@ public final class ChronicleQueueEventJournal implements IEventJournal, AutoClos
         }
     }
 
+    private static void readQueueAfterSequence(final List<EventEnvelope> target,
+                                               final ChronicleQueue queue,
+                                               final long sequence,
+                                               final String queueName) {
+        final ExcerptTailer tailer = queue.createTailer();
+        while (true) {
+            try (DocumentContext documentContext = tailer.readingDocument()) {
+                if (!documentContext.isPresent()) {
+                    return;
+                }
+                final long index = documentContext.index();
+                try {
+                    final EventEnvelope envelope = readEnvelope(documentContext);
+                    if (envelope.timestampMono() > sequence) {
+                        target.add(envelope);
+                    }
+                } catch (final RuntimeException exception) {
+                    throw new IllegalStateException("Unreadable record during readAfterSequence for queue "
+                            + queueName + " at index " + index, exception);
+                }
+            }
+        }
+    }
+
     private static void readNextInto(final ConcurrentLinkedQueue<EventEnvelope> target, final ExcerptTailer tailer) {
         try (DocumentContext documentContext = tailer.readingDocument()) {
             if (!documentContext.isPresent()) {
@@ -203,6 +278,22 @@ public final class ChronicleQueueEventJournal implements IEventJournal, AutoClos
         final byte[] payload = new byte[length];
         bytes.read(payload);
         return EventEnvelope.deserialize(payload);
+    }
+
+    private static EventEnvelope withSequence(final EventEnvelope envelope, final long sequence) {
+        return new EventEnvelope(
+                envelope.eventId(),
+                envelope.eventType(),
+                envelope.brokerOrderId(),
+                envelope.localIntentId(),
+                envelope.canonicalId(),
+                envelope.idempotencyKey(),
+                sequence,
+                envelope.timestampEvent(),
+                envelope.payloadVersion(),
+                envelope.payload(),
+                envelope.sourceProcessId(),
+                envelope.correlationId());
     }
 
     private ExcerptAppender selectAppender(final EventType eventType) {
