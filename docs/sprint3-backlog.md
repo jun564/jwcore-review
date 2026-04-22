@@ -1,279 +1,121 @@
-# Sprint 3 — Backlog iteracji
+# Sprint 3 — backlog
 
-**Data:** 18.04.2026
-**Status:** Plan obowiązujący, Sprint 3.1 w trakcie (jutro nowy czat GPT)
-**Zatwierdzony przez:** Architekt, Claude, Gemini, GPT (ustnie, 18.04.2026)
+**Aktualizacja: 22.04.2026**
 
----
-
-## Kontekst podziału
-
-Sprint 3 pierwotnie miał być dostarczony w jednej iteracji. GPT (Principal Engineer) 18.04.2026 nie był w stanie dostarczyć pełnego zakresu w jednej turze — dostarczał paczki niespełniające kontraktu. Zespół zdecydował o podziale Sprintu 3 na trzy iteracje.
-
-**Warunek zamknięcia Sprintu 3:** wszystkie trzy iteracje (3.1 + 3.2 + 3.3) muszą być zielone. Sprint 4 (Strategy Host) nie startuje po 3.1 ani 3.2.
-
-**Zasada:** każda iteracja osobno spełnia kontrakt jakościowy:
-- Kompletna paczka ZIP
-- `mvn clean verify` BUILD SUCCESS
-- Branch coverage ≥80% w nowych modułach
-- README + RAPORT per iteracja
-- Quality Gate review przez Claude + Gemini przed startem kolejnej
+Dokument operacyjny bieżącego stanu sprintów implementacyjnych Etapu 1 (PoC JForex). Synchronizowany z `Doc5 v1.1` (Plan Prac) oraz `Doc6 v1.1` (Backlog).
 
 ---
 
-## Iteracja 3.1 — Fundament execution + risk coordinator szkielet
+## Sprint 3.1.2 — ZAMKNIĘTY
 
-### Zakres
+Zmergowany do main 21.04.2026 nocą (przez inną instancję Claude + Codex).
 
-**1. `jwcore-execution-common` (nowy moduł):**
-- `ExecutionState` enum (RUN, SAFE, HALT, KILL) + `moreRestrictive()`
-- `ExecutionStateResolver` — resolver konfliktu decyzji lokalnych vs globalnych (hierarchia KILL>HALT>SAFE>RUN)
-- `OrderTimeoutTracker` — rejestr intencji + `checkTimeouts()` z callbackiem
-- `IntentRegistry` — mapowanie intent_id ↔ canonical_id, **SPIĘTY** z OrderTimeoutTracker
-- `EventEnvelope` — pełna struktura (event_id UUID v4, payload_version, timestamps, idempotency_key)
-- `OrderTimeoutEvent` — pełna struktura wg ADR-009
-- `StateRebuiltEvent` — pełna struktura wg ADR-008 (RebuildType enum + Discrepancy record)
-- `EventEmitter` nad IEventJournal
-
-**2. `jwcore-execution-crypto` (nowy moduł):**
-- `ExecutionRuntime` z **pełnym** tickCycle (nie skeleton):
-  a) Czytanie oczekujących `RiskDecisionEvent` z CQ
-  b) Pobranie lokalnych decyzji ryzyka (Poziom 1-2)
-  c) `ExecutionStateResolver` → najbardziej restrykcyjny stan
-  d) Zastosowanie stanu (state transition)
-  e) Obsługa `OrderIntent` w stanie RUN
-  f) Sprawdzenie timeoutów → emisja `OrderTimeoutEvent`
-  g) Emisja `MarginUpdateEvent` co N cykli
-- `main()` z graceful shutdown (SIGTERM handler → GracefulShutdownCoordinator)
-- Konfiguracja z `execution-crypto.properties`
-- **Stub** `BrokerSession` (tylko interfejs, implementacja pełna w 3.2)
-
-**3. `jwcore-execution-forex` (nowy moduł):**
-- Identyczna struktura jak crypto, różnice tylko w konfiguracji
-
-**4. `jwcore-risk-coordinator` (nowy moduł):**
-- `RiskCoordinatorEngine` z `evaluate()` dla total exposure
-- Tailer CQ (events-business + market-data) — struktura kompletna, logika cross-account zostaje w 3.3
-- `main()` z graceful shutdown
-- Konfiguracja z `risk-coordinator.properties`
-
-### Testy 3.1 (obowiązkowe, ≥80% branch coverage)
-
-- `ExecutionStateTest` — wszystkie permutacje moreRestrictive() (4x4 = 16 przypadków)
-- `ExecutionStateResolverTest` — wszystkie kombinacje lokalny/globalny dla RUN/SAFE/HALT/KILL
-- `OrderTimeoutTrackerTest` — rejestracja, wyzwolenie timeout, brak timeout w zakresie, cleanup
-- `IntentRegistryTest` — bind, lookup po intent_id, lookup po canonical_id, usunięcie
-- `StateMachineTest` — legalne przejścia (RUN↔SAFE↔HALT→KILL), nielegalne przejścia
-- `ExecutionRuntimeTest` — mock IEventJournal + mock BrokerSession + ControllableTimeProvider, pełny cykl w różnych stanach
-- `EventEnvelopeTest`, `OrderTimeoutEventTest`, `StateRebuiltEventTest` — walidacja struktur, equals/hashCode
-
-### Definition of Done 3.1
-
-- ✅ `jwcore-sprint3-iteracja-3.1.zip` kompletna paczka
-- ✅ `mvn clean verify` BUILD SUCCESS we wszystkich modułach (weryfikacja przez Code na jwcore-live-01)
-- ✅ Tabela JaCoCo per moduł, branch ≥80%
-- ✅ `README_Sprint_3.1.md`
-- ✅ `RAPORT_Sprint_3.1.md`
-- ✅ Quality Gate review Claude + Gemini → zielone światło na 3.2
+**Paczki:**
+- Paczka 1 — Audyt architektoniczny (10 znalezisk → DŁUG-301 do 308)
+- Paczka 2 — Fixy rejestru (KRYT-001, WYS-001/002, KRYT-003A)
+- Paczki 3-8 — rozbudowa (szczegóły w sesja-2026-04-21.md)
 
 ---
 
-## Iteracja 3.2 — JForex pełny + Reconciliation
+## Sprint 3.2 — W TRAKCIE
 
-### Zakres
+### Zmergowane do main
 
-**1. `jwcore-adapter-jforex` (rozszerzenie obecnego stub):**
-- `JForexBrokerSession` — **async** (nie Thread.sleep), z listenerami
-  - Connect / Disconnect / Reconnect logic (exponential backoff, max N prób)
-  - `ISystemListener` → emisja `BrokerSessionConnectedEvent`, `BrokerSessionLostEvent`, `BrokerSessionReconnectedEvent`
-- `IStrategy` implementacja — emisja ticków do IEventJournal (kolejka market-data)
-- Order send pipeline (OrderIntent → JForex → terminalne eventy)
-- Obsługa terminalnych eventów brokera:
-  - `OrderFilledEvent`
-  - `OrderRejectedEvent`
-  - `OrderCanceledEvent`
+| Paczka | PR | Zakres | Commit HEAD |
+|---|---|---|---|
+| Paczka 1 | #10 | Audyt architektoniczny Sprint 3.1.2 | — |
+| Paczka 2 | #11 | Fixy rejestru | — |
+| Paczka 3A | #12 | Domain lifecycle events | — |
+| Paczka 3B | #13 | ADR-016 + ExposureLedger + SAFE (MVP) | 6f1075e |
 
-**2. `OrderIntent` pipeline pełny:**
-- OrderIntent → IntentRegistry binding canonical_id
-- OrderIntent → JForexBrokerSession.sendOrder()
-- Terminalne eventy → unbind z registry + emisja do CQ
-- Timeout path → Reconciliation Engine
+### W trakcie
 
-**3. Reconciliation Engine (wbudowany w Execution):**
-- Przy starcie procesu: query brokera o stan pozycji/orderów
-- Porównanie z rekonstrukcją z CQ
-- Wykrycie discrepancy → emisja w `StateRebuiltEvent`
-- Przy `OrderTimeoutEvent`: query brokera o status konkretnego zlecenia
-- Jeśli broker zna → emisja właściwego terminalnego eventu z opóźnieniem
-- Jeśli broker nie zna → `OrderUnknownEvent` + eskalacja (Telegram)
+**Paczka 3C — IEventJournal sequence API + RiskCoordinatorTailer offset**
 
-**4. Sole State Rebuilder (ADR-008):**
-- Pełna implementacja (nie szkielet)
-- Snapshot + delta replay
-- Emisja `StateRebuiltEvent` z RebuildType, events_replayed, discrepancies
+- Gałąź: `codex/rozszerz-ieventjournal-o-sequence-api`
+- Status: 🔴 BUILD FAILED
+- Problem: ChronicleQueueEventJournal.append() — `documentContext.index()` ≠ `appender.lastIndexAppended()` w CQ 5.25ea16
+- Symptomy: 10 testów `ChronicleQueueEventJournalContractTest` fail runtime z komunikatem `Assigned sequence mismatch, expected: XXX, actual: YYY` (różnica ~4M = CQ koduje cycle+offset w 64-bit index)
+- Rozwiązanie: wymaga przeprojektowania CQ append przez zespół Gemini+GPT w dedykowanej sesji
 
-**5. Market-data ingestion:**
-- IStrategy onTick → IEventJournal.append (market-data queue)
-- EventEnvelope dla każdego ticka
+**Opcje do rozważenia przez zespół:**
+1. Dwuetapowy zapis (dotychczas zakazany w prompcie)
+2. Sequence poza payloadem CQ (adapter-level AtomicLong + mapping)
+3. Inne API CQ z gwarancją poznania index przed zapisem
 
-### Testy 3.2
+### Zatwierdzona, następna
 
-- Symulowane scenariusze reconnect (mock JForex session)
-- OrderIntent pipeline — happy path (fill) + timeout path + rejection
-- Reconciliation — start z pustym state, start z discrepancy, OrderTimeout → query broker
-- StateRebuild z pustym snapshot i z istniejącym snapshot
-- Market-data volume test (10k ticków/s)
-- Testy integracyjne na koncie DEMO Dukascopy
+**Paczka 3D — Rename EventEnvelope.timestampMono → sequenceNumber**
 
-### Definition of Done 3.2
+- Hard dependency po merge Paczki 3C
+- Dotyka 30-40 plików w kodzie
+- DŁUG-313
+- Dedykowany PR, osobna kolejka (nie backlog)
 
-Jak 3.1, plus:
-- Testy integracyjne na DEMO Dukascopy — zielone
-- Audit trail: ręczne wysłanie OrderIntent → zlecenie widoczne na platformie Dukascopy → terminalny event w CQ
-- Quality Gate review → zielone światło na 3.3
+### Backlog Sprint 3.2 (po 3C i 3D)
+
+W tej kolejności:
+
+- **A)** Eskalacja SAFE→HALT przy powtórzonym OrderUnknown (Wariant D Architekta)
+- **B)** Panel + Telegram alerting SAFE/HALT (ADR-010)
+- **C)** Manualny reset SAFE→RUN (RiskStateResetCommand)
+- **D)** DŁUG-309 — pełna pozycja finansowa ExposureLedger (**BLOKUJE PoC JForex**)
+- **E)** ADR-017 error isolation per-event w ExecutionRuntime
+- **F)** POM-001 crash-recovery timeoutów
+- **G)** OrderFilledEvent + OrderCanceledEvent pełny lifecycle
+- **H)** Advanced Stub Broker przed PoC JForex
 
 ---
 
-## Iteracja 3.3 — Risk cross-account + stabilność
+## Aktywne długi techniczne
 
-### Zakres
+### 🔴 Krytyczne
+- **DŁUG-309** — Pełna pozycja finansowa w ExposureLedger (BLOKUJE PoC JForex)
 
-**1. Pełna logika `RiskCoordinatorEngine`:**
-- Total exposure (suma ekspozycji z obu rachunków)
-- Korelacja instrumentów (gdy pozycje w skorelowanych instrumentach — redukcja limitu)
-- Portfolio drawdown (%)
-- Time-based limits (max X zleceń / godzinę cross-account)
-- Progi konfigurowalne w `risk-coordinator.properties`
+### 🟠 Wysokie
+- **DŁUG-311** — RiskCoordinatorTailer offset (w trakcie Paczka 3C)
+- **DŁUG-313** — Rename timestampMono → sequenceNumber (Paczka 3D)
+- **DŁUG-314** — Reconnect/reconcile w BrokerSession (ADR-003, NOWY z audytu 22.04)
 
-**2. `RiskDecisionEvent` dystrybucja:**
-- Emisja do events-business CQ
-- Subscription w Execution adapterach (crypto, forex)
-- Priorytet: RiskDecisionEvent > lokalne decyzje (hierarchia ADR-011)
+### 🟡 Średnie
+- DŁUG-301 — IntentPhase.canTransitionTo() niekompletny
+- DŁUG-303 — EventEnvelope serializacja versioning
+- DŁUG-305 — OrderTimeoutMonitor bez synchronizacji
+- DŁUG-306 — ChronicleQueueEventJournal retention policy
+- DŁUG-307 — EventEmitter bez circuit breaker
+- DŁUG-308 — IntentRegistry bez TTL
+- DŁUG-310 — OrderRejected vs OrderSubmitted (brak size)
+- DŁUG-312 — Unifikacja 7 kopii InMemoryEventJournal
+- DŁUG-315 — TokenBucket rate limiter (ADR-004, NOWY z audytu 22.04)
 
-**3. `MarginUpdateEvent` emission:**
-- Co 5 sekund (regularnie)
-- Dodatkowo przy zmianie >2%
-- Przy otwarciu/zamknięciu pozycji
-- Per rachunek osobno
-
-**4. Systemd unit files:**
-- `jwcore-execution-crypto.service`
-- `jwcore-execution-forex.service`
-- `jwcore-risk-coordinator.service`
-- Z pełnymi flagami JVM (ADR-013)
-- Z Restart=always, RestartSec=5
-- Lokalizacja logs: `/var/log/jwcore/`
-
-**5. Test 72h stabilności:**
-- Uruchomienie wszystkich 3 procesów na jwcore-live-01
-- Symulacja pełnego workflow (OrderIntent → JForex DEMO → terminalne eventy)
-- Monitoring: memory usage, CPU, thread count, CQ growth, disk I/O
-- Brak memory leaks, brak wiszących wątków, brak restartów
-- Loguj anomalie
-
-### Testy 3.3
-
-- Scenariusze konfliktu decyzji end-to-end (lokalny SAFE + globalny HALT → wygrywa HALT)
-- ExposureLimit cross-account (mock eventów z obu rachunków, przekroczenie progu)
-- PortfolioDrawdown calculation
-- Graceful shutdown całego systemu (wszystkie 3 procesy zakończone w <10s po SIGTERM)
-- Restart resilience (zabij proces → autorestart przez systemd → StateRebuild → normalna praca)
-
-### Definition of Done 3.3
-
-Jak 3.2, plus:
-- Test 72h stabilności → **zielony**
-- Systemd unit files działają (start, stop, restart, enable on boot)
-- Sprint 3 formalnie zamknięty → Etap 1 zamknięty (po BL-005 KYC)
+### 🟢 Niskie
+- DŁUG-302 — CanonicalId walidacja formatów
+- DŁUG-304 — IdempotencyKeys bez salt
 
 ---
 
-## Dług formalnie spisany (z poprzedniej iteracji Sprint 3)
+## Warunki wejścia do PoC JForex
 
-### DŁUG-301 — Baseline Sprint 3 "wersja 0 foundation"
-- GPT dostarczył paczkę bez ExecutionRuntime, pełnych eventów, testów, CQ wiring
-- **Adresowane w 3.1** — kompletne ExecutionRuntime, wszystkie testy, pełne eventy
+Przed uruchomieniem PoC JForex na rzeczywistym koncie DEMO Dukascopy muszą być zamknięte:
 
-### DŁUG-302 — OrderTimeout bez canonical_id mapping
-- W baseline był placeholder "UNKNOWN"
-- **Adresowane w 3.1** — IntentRegistry SPIĘTY z OrderTimeoutTracker
-
-### DŁUG-303 — JForex BrokerSession z Thread.sleep
-- Narusza ADR-001 (no Thread.sleep)
-- **Adresowane w 3.2** — JForexBrokerSession async z listenerami
-
-### DŁUG-304 — Brak BrokerSession events (CONNECTED/LOST)
-- Nie było eventów o zmianie statusu połączenia
-- **Adresowane w 3.2** — osobne eventy w CQ
-
-### DŁUG-305 — CQ wiring w Execution
-- Brak pełnego podpięcia ExecutionRuntime do IEventJournal
-- **Adresowane w 3.1** (czytanie) i 3.2 (pełny bidirectional)
-
-### DŁUG-306 — RiskCoordinator uproszczony
-- Tylko placeholder z jedną metodą evaluate()
-- **Adresowane w 3.3** — pełna logika cross-account
-
-### DŁUG-307 — Brak backpressure w CQ przy dużym tick rate
-- Ryzyko przyznane przez GPT 18.04 — przy market-data volume system może się zakorkować
-- **Adresowane w 3.3** — test 10k ticków/s + kalibracja progów backpressure
+1. ✅ KRYT-001, KRYT-002, KRYT-003 (w toku w 3C)
+2. ⏳ Paczka 3C (IEventJournal sequence API)
+3. ⏳ Paczka 3D (rename timestampMono)
+4. ⏳ DŁUG-309 (pełny model portfelowy w ExposureLedger)
+5. ⏳ DŁUG-314 (reconnect/reconcile w BrokerSession, ADR-003)
+6. ⏳ ADR-017 pozycja E (error isolation per-event)
+7. ⏳ OrderFilledEvent + OrderCanceledEvent pełny lifecycle
+8. ⏳ Advanced Stub Broker (warstwa pośrednia)
+9. ⏳ KYC Dukascopy (Architekt)
+10. ⏳ Panel + Telegram alerting (operacyjnie wymagane)
 
 ---
 
-### DŁUG-308 — Jeden executor CQ dla dwóch kolejek w adapterze Chronicle Queue
-- Problem został zidentyfikowany po pierwszej paczce 3.1/3.1.1
-- Rozszerzenie ADR-006 wymaga osobnego executora per kolejka (`events-business`, `market-data`)
-- **Status:** ZAMKNIĘTY w tej paczce naprawczej
-- `ChronicleQueueEventJournal.tail()` używa teraz:
-  - osobnego executora dla `events-business`
-  - osobnego executora dla `market-data`
-  - osobnego lekkiego dispatchera do uporządkowanego dostarczenia eventów do konsumenta
+## Otwarte gałęzie i PR
 
-## Mapa długu → iteracja
-
-| Dług | Iteracja naprawcza |
-|---|---|
-| 301 (wersja 0 foundation) | 3.1 |
-| 302 (canonical_id) | 3.1 |
-| 303 (Thread.sleep JForex) | 3.2 |
-| 304 (BrokerSession events) | 3.2 |
-| 305 (CQ wiring) | 3.1 + 3.2 |
-| 306 (Risk uproszczony) | 3.3 |
-| 307 (backpressure test) | 3.3 |
+- `codex/rozszerz-ieventjournal-o-sequence-api` — Paczka 3C, build FAILED, pending decyzji zespołu
 
 ---
 
-## Ryzyka iteracji
-
-### 3.1
-- **Nowy czat GPT + onboarding** — pierwsza iteracja może wymagać kalibracji
-- **Wariant wykonawczy 1** (GPT kod → Code build) — nowy flow, może być wolniejszy niż bezpośrednia dostawa
-
-### 3.2
-- **JForex SDK niestabilne w reconnect** — ryzyko przyznane przez GPT. Mitygacja: watchdog + retry logic + testy symulowanej utraty połączenia.
-- **Testy na DEMO** — wymaga aktywnego konta Dukascopy demo
-
-### 3.3
-- **Test 72h na Infomaniak** — pierwszy długi test, może odkryć niespodziewane issues
-- **Kalibracja progów backpressure** — empiryczne, może wymagać kilku przebiegów
-
----
-
-## Harmonogram szacunkowy
-
-- **3.1:** 19-24.04.2026 (koniec kwietnia)
-- **3.2:** 25.04 – 10.05.2026 (pierwsza dekada maja)
-- **3.3:** 11-31.05.2026 (koniec maja)
-- **Test 72h:** 1-3.06.2026
-- **Etap 1 zamknięty:** początek czerwca 2026
-
-Szacunek przy założeniu 5h/dobę dostępności Architekta i sprawnej komunikacji z GPT w nowym czacie. Rewizja po 3.1.
-
-### DŁUG-310 — CQ 5.25ea16 `.toEnd()` na pustej kolejce pomija pierwszy wpis
-- `.toEnd()` wywołane na pustej `ChronicleQueue` (wersja 5.25ea16 early access) powoduje,
-  że tailer nigdy nie widzi pierwszego wpisu dodanego po subskrypcji.
-- **Obejście (3.1.1):** warunkowe `.toEnd()` — wywoływane tylko gdy `entryCount() > 0`.
-  API: `SingleChronicleQueue.entryCount()` potwierdzone przez `javap` na jarze 5.25ea16.
-- **Docelowe rozwiązanie:** przy aktualizacji CQ do wersji stabilnej (≥5.24.x lub ≥5.26)
-  zweryfikować czy bug nadal występuje i usunąć obejście jeśli naprawione upstream.
-- **Adresowane w:** 3.1.1 (obejście), potencjalnie usunięte w 3.2 lub 3.3 przy aktualizacji CQ.
+**Ostatnia sesja:** 22.04.2026 (rano, dokumentacja pakietowa)
+**Poprzednie sesje:** 21.04.2026 (wieczór, Paczki 1-3B), 20-21.04.2026 (noc, inna instancja — Sprint 3.1.2 Paczki 4-8), 18.04.2026 (sesja Claude 12, dokumentacja)

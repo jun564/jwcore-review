@@ -1,209 +1,168 @@
-# JWCore — Podsumowanie Projektu
+# Podsumowanie Projektu JWCore
 
-**Data:** 18.04.2026 (koniec sesji Claude 12)
-**Wersja:** 2.0
+**Wersja 2.1 | Aktualizacja: 22.04.2026**
+
+Dokument syntetyczny — szybki wstęp do projektu JWCore dla nowego członka zespołu lub agenta AI. Zastępuje `Podsumowanie_Projektu_JWCore_v2.md` z 21.04.2026.
 
 ---
 
 ## Czym jest JWCore
 
-JWCore to własny system tradingowy w Javie 21 budowany od zera przez Architekta + zespół AI (GPT, Gemini, Claude, Claude Code). Zastępuje poprzednią infrastrukturę opartą na MetaTrader 5 (MT5), która została formalnie porzucona 16.04.2026.
+JWCore to proprietary system tradingowy w Javie 21, budowany od zera przez jednego Architekta we współpracy z zespołem AI. Cel docelowy: platforma do zarządzania farmą 20+ strategii tradingowych na forex/crypto, z własnym Risk Engine, GUI i modułem podatkowym.
 
-**Broker docelowy:** Dukascopy Bank SA, adapter JForex SDK (Etap 1), docelowo FIX Protocol.
+**Broker docelowy:** Dukascopy Bank SA (JForex SDK → FIX API w Etapie 6).
+**Instrumenty:** Start z BTC/USD. Docelowo: cross-asset portfolio.
+**Model:** Event-sourcing, Hexagonal Architecture, wielomodułowy Maven.
 
-**Farma:** `JWCoreFarm` (było `JGGK Farm`). Domena projektu: `jwcorefarm`.
-
----
-
-## Filozofia architektury
-
-### Pryncypia
-
-1. **Event Sourcing pure** — wszystko idzie przez Chronicle Queue. Zero shared state między procesami.
-2. **Hexagonal Architecture** — domena czysta, porty abstrakcyjne, adaptery wymienne.
-3. **Izolacja awarii > koszt zasobów** — osobne procesy JVM per rachunek brokerski, per rola.
-4. **Ochrona kapitału > cokolwiek innego** — w razie wątpliwości wybieramy konserwatywną ścieżkę.
-5. **Człowiek decyduje o kapitale** — automat monitoruje, ostrzega, ogranicza. Nie likwiduje masowo pozycji.
-6. **Determinizm > szybkość** — testy reprodukowalne, ControllableTimeProvider, zero System.currentTimeMillis.
-
-### Główne decyzje architektoniczne (skrót)
-
-**Topologia procesów JVM (docelowa):**
-- `jwcore-execution-crypto` — execution + lokalne risk dla rachunku krypto
-- `jwcore-execution-forex` — execution + lokalne risk dla rachunku forex
-- `jwcore-risk-coordinator` — global risk cross-account
-- `jwcore-strategy-host` — strategie tradingowe
-- `jwcore-control` — procesy kontrolne
-- `jwcore-gui` — interfejs użytkownika
-
-**Dwa rachunki Dukascopy** (decyzja 18.04.2026): krypto + forex/surowce, osobne sesje JForex, osobne procesy JVM.
-
-**Tryby awaryjne per rachunek (ADR-011):** RUN / SAFE / HALT / KILL, hierarchia "bardziej restrykcyjny wygrywa".
-
-**Broker likwiduje pozycje przy awarii** — system ich nie zamyka masowo.
-
-**Event Sourcing:** Chronicle Queue 5.25ea16 (pinned), dwie kolejki (market-data + events-business), executor per kolejka, obowiązkowe flagi JVM `--add-opens`.
+**Historia:**
+- Do kwietnia 2026 — prototyp farmy w MetaTrader 5 (EA robots), jako baza do koncepcji.
+- 14.04.2026 — decyzja o porzuceniu MT5 i budowie własnego systemu w Java. Nazwa JGGK CORE.
+- 18.04.2026 — rename na JWCore. Pakiet dokumentacji v1.0 (Doc1-Doc6).
+- 21-22.04.2026 — Sprinty 1 → 3.2 w trakcie Etapu 1. Zespół rozszerzony o Codex. Dokumentacja v2.0 (Doc1-Doc7).
 
 ---
 
-## Zespół AI
+## Zespół
 
-### Role i odpowiedzialności
+Wszyscy komunikują po polsku. Architekt ma ostatnie słowo.
 
-| Członek | Rola | Kompetencje |
+- **Architekt** — właściciel projektu. Pracuje nie w pełnym wymiarze, godzi z pracą zawodową.
+- **Gemini** — Chief Technical Architect. Projektowanie architektury.
+- **GPT** — Principal Engineer. Propozycje implementacyjne.
+- **Claude** — Quality Gate Coordinator. Synteza zespołu, dokumentacja, krytyka.
+- **Codex** — Implementation Agent (kod). Implementuje paczki sprintów w repo.
+- **Claude Code** — Implementation Agent (infrastruktura). SSH, build, merge, operacje.
+
+Granica Codex vs Claude Code:
+- **Codex** = kod aplikacji w repo jwcore (feature branches + PR).
+- **Claude Code** = operacje systemowe (merge main, testy, SSH na serwery, backup).
+
+Szczegóły: `docs/ZESPOL.md` i `docs/ZASADY_WSPOLPRACY.md`.
+
+---
+
+## Infrastruktura
+
+### Serwery
+
+| Serwer | OS | Rola |
 |---|---|---|
-| **Architekt** | Właściciel projektu, ostateczna decyzja | Trading, MT5 legacy, budżet, wizja |
-| **GPT** | Principal Engineer | Kod Java, testy jednostkowe, implementacja |
-| **Gemini** | Chief Technical Architect | Architektura, ADR, topologie, low-latency |
-| **Claude** | Quality Gate Coordinator | Synteza, krytyka, dokumentacja, prompty |
-| **Claude Code** | Implementation Agent | SSH, GitHub, pliki lokalne, build, deploy |
+| Hetzner VPS | Ubuntu | Orkiestrator, API główny |
+| ForexVPS | Windows | Live trading (JForex docelowo) |
+| Contabo VPS | Ubuntu (migracja z Windows) | Optymalizacja (Docker workers) |
 
-### Zasady komunikacji (obowiązują od 18.04.2026)
+### Repo
 
-1. Każdy mówi za siebie (zakaz "w imieniu zespołu")
-2. Każdy w swojej roli
-3. Zakaz autoprezentacji
-4. Zakaz przekłamań (tylko prawdziwe cytaty)
-5. Krytyka wymagana (zakaz przytakiwania)
-
-**Format odpowiedzi:** `[Członek — Rola]:` + meritum od pierwszego zdania.
-
-**Język:** polski wszędzie (korespondencja, GUI, dokumentacja, komentarze). Wyjątki: kod źródłowy (nazwy klas/metod po angielsku), nazwy własne (JWCore, JWCoreFarm).
+- `jun564/jwcore` — prywatne, główne repo
+- `jun564/jwcore-review` — publiczne, auto-sync po pushu do main
 
 ---
 
-## Stan projektu (18.04.2026)
+## Stan projektu na 22.04.2026
 
-### Infrastruktura ✅
+### Etap 0 (Fundament) — ZAMKNIĘTY
 
-**Serwer live:** `jwcore-live-01` @ Infomaniak (Satigny/Genewa)
-- IP: 83.228.196.250
-- Ubuntu 24.04 LTS, 4 vCPU, 12 GB RAM, 250 GB
-- OpenJDK 21.0.10, Maven 3.9.15, Git, UFW, Fail2ban
-- User `jwcore` (sudo NOPASSWD, klucz SSH), ubuntu zapas, root wyłączony
-- €29/mies
+Pozostałe otwarte sprawy Architekta (KYC Dukascopy, regeneracja tokenu GitHub, instalacja Docker Desktop) nie blokują prac implementacyjnych zespołu AI.
 
-**Repo:** https://github.com/jun564/jwcore (prywatne)
-**Commit:** 2a701ce (Sprint 1 + Sprint 2 v2)
-**Archive MT5:** https://github.com/jun564/jggk-mt5-archive-2026-04-18 (prywatne)
+### Etap 1 (PoC JForex) — W TRAKCIE
 
-### Sprinty
+Realizowany przez kolejne Sprinty implementacyjne:
 
-| Sprint | Status | Zakres |
-|---|---|---|
-| **Sprint 1** | ✅ Zamknięty | Fundament Maven, domena, core |
-| **Sprint 2** | ✅ Zamknięty | Event Sourcing, Chronicle Queue, backpressure szkielety |
-| **Sprint 3.1** | ⏳ W toku (jutro nowy czat GPT) | Fundament execution + risk coordinator |
-| **Sprint 3.2** | ⛔ Zablokowany przez 3.1 | JForex pełny + reconciliation |
-| **Sprint 3.3** | ⛔ Zablokowany przez 3.2 | Risk cross-account + test 72h |
-| **Sprint 4** | 🔮 Po Etapie 1 | Strategy Host (blocker: test edge'u BTC) |
-| **Sprint 5** | 🔮 Po Sprincie 4 | GUI |
+| Sprint | Status |
+|---|---|
+| Sprint 1 (fundament) | 🟢 ZAMKNIĘTY |
+| Sprint 2 (execution) | 🟢 ZAMKNIĘTY |
+| Sprint 3.1 (risk-coordinator) | 🟢 ZAMKNIĘTY |
+| Sprint 3.1.1 (Event Correlation) | 🟢 ZAMKNIĘTY |
+| Sprint 3.1.2 (audyt + fixy) | 🟢 ZAMKNIĘTY |
+| Sprint 3.2 (Paczki 1-3B+) | 🟡 W TRAKCIE (3C build failed) |
 
-### Zatwierdzone ADR
+### Etapy 2-6
 
-**Fundamentalne (wcześniejsze sesje):**
-- ADR-001 — Time (ITimeProvider, ControllableTimeProvider)
-- ADR-003 — Event Sourcing na Chronicle Queue
-- ADR-005 — Backpressure trójstopniowy
-- ADR-006 — Event Envelope + CanonicalId
-
-**Z sesji Claude 12 (18.04.2026):**
-- ADR-006 rozszerzenie — Executor per kolejka CQ + lifecycle
-- ADR-008 — Execution jako sole state rebuilder + StateRebuiltEvent
-- ADR-009 — OrderTimeoutEvent
-- ADR-010 — Margin Monitor w GUI (informacyjny, nie automat)
-- ADR-011 — SAFE/HALT/KILL per rachunek + global risk coordinator
-- ADR-012 — Pinning Chronicle Queue 5.25ea16
-- ADR-013 — Obowiązkowe flagi JVM
+Oczekują. Szczegóły w `Doc5 v1.1` i `docs/STAN_IMPLEMENTACJI.md`.
 
 ---
 
-## Zagrożenia aktualne
+## Pakiet dokumentacji
 
-### Wysokie
+Obowiązują dwa źródła prawdy:
 
-1. **GPT tempo dostarczania** — niezdolność dostarczenia pełnego Sprint 3.1 w jednej turze (18.04). Mitygacja: nowy czat + Wariant 1 (GPT kod → Code build → feedback).
-2. **Brak dowodu edge'u strategii BTC strefowej** — otwarty zarzut Claude Quality Gate od Claude 11. Przed Sprintem 4 (Strategy Host) wymagany raport z analizą danych MT5.
+**Kanoniczne docx (u Architekta):**
+- Doc1 v2.0 — Zasady Pracy Zespołu AI
+- Doc2 — Podsumowanie Sesji Claude 12 (archiwalny)
+- Doc3A v2.1 + Doc3B v2.1 — Architektura (baseline)
+- Doc3 Uzupełnienie v2.2 — delta (stan impl + otwarte spory)
+- Doc4 v2.0 — ADR-001 do ADR-017
+- Doc5 v1.1 — Plan Prac + Pending Register
+- Doc6 v1.1 — Backlog Problemów Technicznych (BL + DŁUG)
+- Doc7 v1.0 — Stan Implementacji
 
-### Średnie
+**Operacyjne md (w repo):**
+- `docs/ZASADY_WSPOLPRACY.md` — sync z Doc1 v2.0
+- `docs/ZESPOL.md` — członkowie zespołu
+- `docs/STAN_IMPLEMENTACJI.md` — sync z Doc7
+- `docs/NARZEDZIA_ZESPOLU.md` — inwentaryzacja narzędzi
+- `docs/sprint3-backlog.md` — bieżący stan sprintu
+- `adr/ADR-006.md` do `adr/ADR-017.md` — formalne ADR-y (ADR-001 do 005 tylko w Doc4)
 
-3. **Contabo niedostępny** — czekamy na support. Nie blokuje Etapu 1 (Infomaniak wystarczy).
-4. **Realna dostępność Architekta** — 5h/dobę, harmonogram Etapu 1 realnie maj-czerwiec 2026.
-
-### Niskie
-
-5. **Dokumenty Dukascopy KYC** — formalność, robione równolegle.
-6. **Flagi JVM jako dług** — Project Panama docelowo zastąpi, monitoring CQ releases.
-
----
-
-## Najważniejsze liczby
-
-- **Sprinty zamknięte:** 2 (Sprint 1, Sprint 2)
-- **Testów jednostkowych:** 77 (zielone, 0 failures)
-- **Branch coverage:** domain 80.2%, core 83.3%, adapter-cq 80.0%
-- **ADR zatwierdzonych:** 13 (z tego 7 w sesji Claude 12)
-- **Procesów JVM docelowo:** 6 (3 w Sprincie 3, 2 w Sprincie 4, 1 w Sprincie 5)
-- **Kod:** 62 pliki, 2582 linie
-- **RAM Infomaniak:** 12 GB (zapas ~5 GB po pełnym deploy)
-- **Sesji Claude:** 12 (od pivotu MT5→JWCore: sesje 10, 11, 12)
+Pierwszeństwo dla bieżącego stanu: pliki .md w repo. Pierwszeństwo dla formalnych decyzji: dokumenty docx.
 
 ---
 
-## Plan najbliższy (po sesji 18.04.2026)
+## Aktywne długi techniczne (krytyczne i wysokie)
 
-### Jutro (19.04.2026)
+### 🔴 Krytyczne
+- **DŁUG-309** — Pełna pozycja finansowa w ExposureLedger (BLOKUJE PoC JForex)
 
-1. **Nowy czat GPT** — onboarding dokument (`docs/GPT_ONBOARDING.md`)
-2. GPT rozpoczyna Sprint 3.1 zgodnie z Wariantem 1 (kod → Code build)
-3. Code wykonuje `mvn clean verify` na jwcore-live-01, zwraca wynik
-4. Iteracje do zielonego
+### 🟠 Wysokie
+- **DŁUG-311** — RiskCoordinatorTailer offset (w trakcie Paczka 3C)
+- **DŁUG-313** — Rename timestampMono → sequenceNumber (Paczka 3D, hard dep po 3C)
+- **DŁUG-314** — Reconnect/reconcile w BrokerSession (ADR-003, NOWY)
 
-### Najbliższe dni
-
-- Sprint 3.1 finalizacja
-- Code commituje drafty ADR do `adr/` w repo jwcore
-- Claude Quality Gate review przed 3.2
-
-### Najbliższe tygodnie (szacunek)
-
-- Sprint 3.2 — koniec kwietnia / początek maja 2026
-- Sprint 3.3 + test 72h — maj 2026
-- Etap 1 zamknięcie — czerwiec 2026
+Pełna lista: `Doc6 v1.1` + `docs/sprint3-backlog.md`.
 
 ---
 
-## Kluczowe decyzje do podjęcia
+## Otwarte kwestie architektoniczne
 
-### Wymagające Architekta (pilne)
+Spory z 18.04.2026, nierozstrzygnięte:
 
-1. Credentials brokera — clear text .properties vs /etc/jwcore/secrets/ z szyfrowaniem
-2. Timeout per rachunek — wartości startowe (propozycja: krypto 15s, forex 30s)
-3. Progi risk coordinator cross-account (total exposure, portfolio drawdown) — konkretne liczby
+1. **Disruptor+CQ vs PostgreSQL log** — WYSOKI priorytet, blokuje Etap 4
+2. **Opcje B/C dla adaptera JForex** — ŚREDNI priorytet, przed Etapem 2
 
-### Wymagające zespołu
-
-4. Test edge'u strategii BTC — metodologia, kryteria akceptacji
-5. Quarterly review CQ i JDK releases — kto monitoruje?
-6. Strategia migracji na FIX Protocol — kiedy i jak
+Wymagają dedykowanej sesji Gemini+GPT+Claude. Szczegóły: `Doc3 Uzupełnienie v2.2`.
 
 ---
 
-## Dokumenty referencyjne
+## Zasady współpracy (skrót)
 
-- **Doc1** — Wizja i cele (nie zmieniony w Claude 12)
-- **Doc2 v2.1** — Decyzje projektowe (zaktualizowany 18.04 — dual broker)
-- **Doc3A** — ADR-y wcześniejsze (ADR-001, 002, 003, 004, 005)
-- **Doc3B** — ADR-y z sesji Claude 12 (ADR-006 ext, 008, 009, 010, 011, 012, 013)
-- **Doc4** — Dokument architektoniczny JWCore v1 (w iteracji, po uwagach Claude 11)
-- **Doc5 v5.2** — Plan etapów (zaktualizowany 18.04 — Sprint 3 podzielony)
-- **Doc6 v6.2** — Backlog (zaktualizowany 18.04 — BL-006 wysoki)
+Pełne 29 zasad w `docs/ZASADY_WSPOLPRACY.md` (v2.0). Kluczowe:
+
+- Komunikacja w języku polskim, po ludzku
+- Hierarchia konfliktów: Gemini → GPT → Claude → Architekt
+- Bez terminów i harmonogramów (zasada 5.11)
+- Commit tagi `[ADR-X]`
+- Safe Mode Code — przed destrukcyjnymi operacjami konfiguruj alternatywę
+- QG self-discipline — Claude nie rozstrzyga unilateralnie
+- Bez imienia Architekta — zawsze "Architekt"
+- Rytm pracy Architekta — Claude nie sugeruje zmęczenia ani nie proponuje zakończenia dnia
 
 ---
 
-## Kontakt operacyjny
+## Szybki start dla nowego agenta
 
-**Właściciel:** Architekt (JWCore, JWCoreFarm — nazwy własne, nie podawać imienia)
-**Repo GitHub:** jun564/jwcore
-**Serwer:** jwcore@83.228.196.250
-**Workspace lokalny:** `C:\Users\janus\Desktop\Janusz\SIT Polska\TRADEROWO\schematy AI\Farma JWCore\`
+Jeśli jesteś nowym agentem AI (GPT, Gemini, Codex) dołączonym do projektu:
+
+1. Przeczytaj `docs/ZASADY_WSPOLPRACY.md` (29 zasad).
+2. Przeczytaj `docs/ZESPOL.md` (twoja rola i ograniczenia).
+3. Przeczytaj `docs/STAN_IMPLEMENTACJI.md` (stan kodu).
+4. Przeczytaj `docs/sprint3-backlog.md` (co jest w trakcie).
+5. Jeśli robisz coś architektonicznego — Doc3A+3B v2.1 + Doc3 Uzupełnienie v2.2.
+6. Jeśli robisz coś związanego z ADR — Doc4 v2.0 lub `adr/`.
+7. Jeśli pracujesz nad paczką Sprint — dedykowany prompt od Claude z kontekstem.
+
+---
+
+**Dokument kanoniczny:** `Doc7 — Stan Implementacji v1.0` (szczegóły techniczne)
+**Wersja:** 2.1
+**Data:** 22.04.2026
