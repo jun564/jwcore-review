@@ -1,168 +1,127 @@
 # Podsumowanie Projektu JWCore
 
-**Wersja 2.1 | Aktualizacja: 22.04.2026**
-
-Dokument syntetyczny — szybki wstęp do projektu JWCore dla nowego członka zespołu lub agenta AI. Zastępuje `Podsumowanie_Projektu_JWCore_v2.md` z 21.04.2026.
-
----
-
-## Czym jest JWCore
-
-JWCore to proprietary system tradingowy w Javie 21, budowany od zera przez jednego Architekta we współpracy z zespołem AI. Cel docelowy: platforma do zarządzania farmą 20+ strategii tradingowych na forex/crypto, z własnym Risk Engine, GUI i modułem podatkowym.
-
-**Broker docelowy:** Dukascopy Bank SA (JForex SDK → FIX API w Etapie 6).
-**Instrumenty:** Start z BTC/USD. Docelowo: cross-asset portfolio.
-**Model:** Event-sourcing, Hexagonal Architecture, wielomodułowy Maven.
-
-**Historia:**
-- Do kwietnia 2026 — prototyp farmy w MetaTrader 5 (EA robots), jako baza do koncepcji.
-- 14.04.2026 — decyzja o porzuceniu MT5 i budowie własnego systemu w Java. Nazwa JGGK CORE.
-- 18.04.2026 — rename na JWCore. Pakiet dokumentacji v1.0 (Doc1-Doc6).
-- 21-22.04.2026 — Sprinty 1 → 3.2 w trakcie Etapu 1. Zespół rozszerzony o Codex. Dokumentacja v2.0 (Doc1-Doc7).
+**Wersja:** 2.2 (22.04.2026 wieczór, po zamknięciu Paczki 4A)
+**Autor:** Zespół AI (GPT, Gemini, Claude) + Architekt
+**Status:** W aktywnej realizacji
 
 ---
 
-## Zespół
+## Cel projektu
 
-Wszyscy komunikują po polsku. Architekt ma ostatnie słowo.
+JWCore — własny system tradingowy w Javie 21, zastępujący infrastrukturę MT5. Pierwszy adapter: Dukascopy Bank SA przez JForex SDK. Docelowo: FIX API dla wielu brokerów.
 
-- **Architekt** — właściciel projektu. Pracuje nie w pełnym wymiarze, godzi z pracą zawodową.
-- **Gemini** — Chief Technical Architect. Projektowanie architektury.
-- **GPT** — Principal Engineer. Propozycje implementacyjne.
-- **Claude** — Quality Gate Coordinator. Synteza zespołu, dokumentacja, krytyka.
-- **Codex** — Implementation Agent (kod). Implementuje paczki sprintów w repo.
-- **Claude Code** — Implementation Agent (infrastruktura). SSH, build, merge, operacje.
-
-Granica Codex vs Claude Code:
-- **Codex** = kod aplikacji w repo jwcore (feature branches + PR).
-- **Claude Code** = operacje systemowe (merge main, testy, SSH na serwery, backup).
-
-Szczegóły: `docs/ZESPOL.md` i `docs/ZASADY_WSPOLPRACY.md`.
-
----
+Budowany przez zespół AI (Principal Engineer, Chief Technical Architect, Quality Gate, Code Generator, Implementation Agent) pod kierownictwem Architekta. Komunikacja całkowicie po polsku.
 
 ## Infrastruktura
 
-### Serwery
+| Element | Lokalizacja | Rola |
+|---------|-------------|------|
+| Repo prywatne | github.com/jun564/jwcore | Źródło prawdy |
+| Repo publiczne | github.com/jun564/jwcore-review | Auto-sync po pushu do main, dla connectorów GPT/Gemini |
+| VPS Hetzner (Ubuntu) | Orchestrator/API | Infrastruktura kontrolna |
+| VPS ForexVPS (Windows) | Live trading | Produkcja |
+| VPS Contabo (Windows Server 2025) | Optymalizacja | Równoległy optymalizator strategii |
+| Klon lokalny | `C:\Users\janus\Desktop\Janusz\SIT Polska\TRADEROWO\schematy AI\Farma JWCore\repo\jwcore` | Lokalizacja Architekta |
 
-| Serwer | OS | Rola |
-|---|---|---|
-| Hetzner VPS | Ubuntu | Orkiestrator, API główny |
-| ForexVPS | Windows | Live trading (JForex docelowo) |
-| Contabo VPS | Ubuntu (migracja z Windows) | Optymalizacja (Docker workers) |
+Demo konta MT5 (Contabo, optymalizacja) — archiwum infrastruktury MT5, zachowane dla testów.
 
-### Repo
+## Stan sprintów
 
-- `jun564/jwcore` — prywatne, główne repo
-- `jun564/jwcore-review` — publiczne, auto-sync po pushu do main
+### Sprint 3.1 — ZAMKNIĘTY
 
----
+- 3.1.1 — Audit
+- 3.1.2 — Domain lifecycle events + RejectReason
 
-## Stan projektu na 22.04.2026
+### Sprint 3.2 — W REALIZACJI
 
-### Etap 0 (Fundament) — ZAMKNIĘTY
+| Paczka | Status |
+|--------|--------|
+| 1 — OrderEventEnvelope + BinaryCodec | ZAMKNIĘTA |
+| 2 — ChronicleQueueEventJournal MVP | ZAMKNIĘTA |
+| 3A — Domain lifecycle events | ZAMKNIĘTA |
+| 3B — ExposureLedger MVP + SAFE + idempotency | ZAMKNIĘTA |
+| 3C — Sequence API + Tailer offset | ZAMKNIĘTA |
+| 3D — Rename timestampMono → sequenceNumber | ZAMKNIĘTA |
+| 4A — ExposureLedger pełna pozycja + lifecycle + OrderTimeoutMonitor sync | ZAMKNIĘTA |
+| 4B — Reconnect/reconcile + przepisanie 5 testów RiskCoordinator | W PLANIE (blokuje PoC) |
+| 4C — Error isolation + SAFE/HALT alerting | W PLANIE |
+| 4D — Advanced Stub Broker | W PLANIE (warunek PoC) |
+| 5 — PoC JForex (Etap 1, demo) | ZABLOKOWANA 4B+4D |
 
-Pozostałe otwarte sprawy Architekta (KYC Dukascopy, regeneracja tokenu GitHub, instalacja Docker Desktop) nie blokują prac implementacyjnych zespołu AI.
+## Kluczowe komponenty (stan na 22.04.2026 wieczór)
 
-### Etap 1 (PoC JForex) — W TRAKCIE
+### Warstwa domain
+- `EventEnvelope` — pozycyjny BinaryCodec, sequenceNumber zamiast timestampMono
+- `OrderIntentEvent`, `OrderSubmittedEvent`, `OrderRejectedEvent` — z lifecycle
+- `OrderFilledEvent` — nowy kształt 4A (10 pól, OrderSide, filledQuantity, averagePrice, commission, remainingQuantity, itd.)
+- `OrderCanceledEvent` — nowy kształt 4A (6 pól, reason z dozwolonego zbioru)
+- `OrderSide` — BUY/SELL
 
-Realizowany przez kolejne Sprinty implementacyjne:
+### Warstwa core
+- `ChronicleQueueEventJournal` — implementacja z AtomicLong sequence counter
+- `OrderTimeoutMonitor` — zsynchronizowany, emisja poza lockiem (4A, DŁUG-305 zamknięty)
+- `IEventJournal`, `AbstractEventJournalContractTest` — kontrakty
 
-| Sprint | Status |
-|---|---|
-| Sprint 1 (fundament) | 🟢 ZAMKNIĘTY |
-| Sprint 2 (execution) | 🟢 ZAMKNIĘTY |
-| Sprint 3.1 (risk-coordinator) | 🟢 ZAMKNIĘTY |
-| Sprint 3.1.1 (Event Correlation) | 🟢 ZAMKNIĘTY |
-| Sprint 3.1.2 (audyt + fixy) | 🟢 ZAMKNIĘTY |
-| Sprint 3.2 (Paczki 1-3B+) | 🟡 W TRAKCIE (3C build failed) |
+### Warstwa risk coordinator
+- `ExposureLedger` — pełna pozycja finansowa per canonicalId (netPosition, avgEntryPrice VWAP, realizedPnL netto, totalCommission, totalExposure, marginUsed, intentCount) + fail-fast przy brakującym pending intent (DŁUG-309 zamknięty)
+- `RiskCoordinatorEngine` — dostosowany do nowego API ExposureLedger; mostek accountId → canonicalId
+- `RiskCoordinatorTailer` — offset persistence przez sequence API (DŁUG-311 zamknięty)
 
-### Etapy 2-6
+### Warstwa execution
+- `execution-common` — deterministyczny idempotency key
+- `execution-crypto` — szkielet (testy zielone)
+- `execution-forex` — szkielet (testy zielone)
 
-Oczekują. Szczegóły w `Doc5 v1.1` i `docs/STAN_IMPLEMENTACJI.md`.
+### Warstwa adapter
+- `adapter-cq` — Chronicle Queue adapter (5 testów kontraktowych)
+- `adapter-jforex` — szkielet bez egzekucji
 
----
+## Zespół AI
 
-## Pakiet dokumentacji
+| Członek | Rola | Model | Dostęp do kodu |
+|---------|------|-------|----------------|
+| Gemini | Chief Technical Architect | — | Import kodu (re-import per iteracja) |
+| GPT | Principal Engineer | — | Connector GitHub (per-file) |
+| Claude | Quality Gate Coordinator | Opus 4.7 | git clone + connector |
+| Codex | Code Generator (OpenAI) | — | Git + autopush po „Utwórz PR" |
+| Claude Code | Implementation Agent | — | Git + PAT (pełny dostęp zapisu) |
 
-Obowiązują dwa źródła prawdy:
+Architekt — decyzja finalna, właściciel projektu.
 
-**Kanoniczne docx (u Architekta):**
-- Doc1 v2.0 — Zasady Pracy Zespołu AI
-- Doc2 — Podsumowanie Sesji Claude 12 (archiwalny)
-- Doc3A v2.1 + Doc3B v2.1 — Architektura (baseline)
-- Doc3 Uzupełnienie v2.2 — delta (stan impl + otwarte spory)
-- Doc4 v2.0 — ADR-001 do ADR-017
-- Doc5 v1.1 — Plan Prac + Pending Register
-- Doc6 v1.1 — Backlog Problemów Technicznych (BL + DŁUG)
-- Doc7 v1.0 — Stan Implementacji
+## Zasady obowiązujące
 
-**Operacyjne md (w repo):**
-- `docs/ZASADY_WSPOLPRACY.md` — sync z Doc1 v2.0
-- `docs/ZESPOL.md` — członkowie zespołu
-- `docs/STAN_IMPLEMENTACJI.md` — sync z Doc7
-- `docs/NARZEDZIA_ZESPOLU.md` — inwentaryzacja narzędzi
-- `docs/sprint3-backlog.md` — bieżący stan sprintu
-- `adr/ADR-006.md` do `adr/ADR-017.md` — formalne ADR-y (ADR-001 do 005 tylko w Doc4)
+Lista zasad: `docs/ZASADY_WSPOLPRACY.md` v1.2 (22.04.2026) — 35 zasad.
 
-Pierwszeństwo dla bieżącego stanu: pliki .md w repo. Pierwszeństwo dla formalnych decyzji: dokumenty docx.
+Najistotniejsze świeże (22.04.2026):
+- Zasada 30 — walidacja zależności w promptach Codex (Codex nie ma Mavena, pisze na ślepo)
+- Zasada 31 — wyjątek build-fix dla Code (pragmatyka, po 2 iteracjach build-fix w 4A)
 
----
+## Długi techniczne — priorytety
 
-## Aktywne długi techniczne (krytyczne i wysokie)
+**BLOKUJĄCE PoC JForex:**
+- DŁUG-314 — Reconnect/reconcile w BrokerSession (Paczka 4B)
 
-### 🔴 Krytyczne
-- **DŁUG-309** — Pełna pozycja finansowa w ExposureLedger (BLOKUJE PoC JForex)
+**Oczyszczenie w 4B+:**
+- DŁUG-318 — Przepisanie 5 @Disabled testów RiskCoordinatorEngine pod nowy model z 4A
 
-### 🟠 Wysokie
-- **DŁUG-311** — RiskCoordinatorTailer offset (w trakcie Paczka 3C)
-- **DŁUG-313** — Rename timestampMono → sequenceNumber (Paczka 3D, hard dep po 3C)
-- **DŁUG-314** — Reconnect/reconcile w BrokerSession (ADR-003, NOWY)
+**Pozostałe:** DŁUG-301, 302, 303, 304, 306, 307, 308, 310, 312, 315, 317 — otwarte, żaden nie blokuje PoC.
 
-Pełna lista: `Doc6 v1.1` + `docs/sprint3-backlog.md`.
+**Zamknięte 22.04.2026:** DŁUG-305 (OrderTimeoutMonitor sync), DŁUG-309 (pełna pozycja finansowa), DŁUG-311 (tailer offset), DŁUG-313 (rename), DŁUG-316 (workflow sync-to-review).
 
----
+## Historia 22.04.2026 (skrót)
 
-## Otwarte kwestie architektoniczne
+1. Pakiet dokumentacji v2.0 (7 docx + 6 md) → main
+2. Incydent bezpieczeństwa PAT → odwołany, nowy w Credential Manager, klon repo w stałej lokalizacji
+3. Workflow sync-to-review (DŁUG-316) → naprawione
+4. Paczka 3C v2 (sequence API z AtomicLong) → merge po fix test-jar
+5. Paczka 3D (rename) → merge (czysty refactor)
+6. Paczka 4A (ExposureLedger pełna pozycja + lifecycle events + OrderTimeoutMonitor sync) → merge po 3 iteracjach build-fix
+7. Pakiet dokumentacji v2.1 wieczorny → w przygotowaniu (ten dokument)
 
-Spory z 18.04.2026, nierozstrzygnięte:
+## Co dalej
 
-1. **Disruptor+CQ vs PostgreSQL log** — WYSOKI priorytet, blokuje Etap 4
-2. **Opcje B/C dla adaptera JForex** — ŚREDNI priorytet, przed Etapem 2
-
-Wymagają dedykowanej sesji Gemini+GPT+Claude. Szczegóły: `Doc3 Uzupełnienie v2.2`.
-
----
-
-## Zasady współpracy (skrót)
-
-Pełne 29 zasad w `docs/ZASADY_WSPOLPRACY.md` (v2.0). Kluczowe:
-
-- Komunikacja w języku polskim, po ludzku
-- Hierarchia konfliktów: Gemini → GPT → Claude → Architekt
-- Bez terminów i harmonogramów (zasada 5.11)
-- Commit tagi `[ADR-X]`
-- Safe Mode Code — przed destrukcyjnymi operacjami konfiguruj alternatywę
-- QG self-discipline — Claude nie rozstrzyga unilateralnie
-- Bez imienia Architekta — zawsze "Architekt"
-- Rytm pracy Architekta — Claude nie sugeruje zmęczenia ani nie proponuje zakończenia dnia
-
----
-
-## Szybki start dla nowego agenta
-
-Jeśli jesteś nowym agentem AI (GPT, Gemini, Codex) dołączonym do projektu:
-
-1. Przeczytaj `docs/ZASADY_WSPOLPRACY.md` (29 zasad).
-2. Przeczytaj `docs/ZESPOL.md` (twoja rola i ograniczenia).
-3. Przeczytaj `docs/STAN_IMPLEMENTACJI.md` (stan kodu).
-4. Przeczytaj `docs/sprint3-backlog.md` (co jest w trakcie).
-5. Jeśli robisz coś architektonicznego — Doc3A+3B v2.1 + Doc3 Uzupełnienie v2.2.
-6. Jeśli robisz coś związanego z ADR — Doc4 v2.0 lub `adr/`.
-7. Jeśli pracujesz nad paczką Sprint — dedykowany prompt od Claude z kontekstem.
-
----
-
-**Dokument kanoniczny:** `Doc7 — Stan Implementacji v1.0` (szczegóły techniczne)
-**Wersja:** 2.1
-**Data:** 22.04.2026
+Kolejność logiczna:
+1. Paczka 4B — reconnect/reconcile + 5 testów
+2. Paczka 4D — Advanced Stub Broker
+3. Paczka 5 — PoC JForex (demo)
+4. Paczka 4C (równolegle) — alerting + error isolation

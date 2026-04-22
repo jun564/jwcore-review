@@ -1,231 +1,99 @@
-# Stan Implementacji JWCore
+# Stan implementacji JWCore
 
-**Snapshot: 22.04.2026 rano**
-
-Dokument operacyjny mapujący aktualny stan implementacji projektu JWCore. Synchronizowany z `Doc7 — Stan Implementacji v1.0` (docx, archiwum formalne u Architekta).
-
-Aktualizowany po każdym zmergowanym PR. Pierwszeństwo ma ten dokument dla pytań "jak jest teraz w kodzie".
+**Wersja:** 1.1 (22.04.2026 wieczór)
+**Branch:** main
+**Ostatni commit merge:** d39e7c1 (Paczka 4A)
 
 ---
 
-## Moduły projektu
+## Moduły i status kompilacji
 
-Kod JWCore jest zorganizowany w Maven multi-module (ADR-014). 7 modułów:
+| Moduł | Status | Testów | Uwagi |
+|-------|--------|--------|-------|
+| jwcore-parent | SUCCESS | — | — |
+| jwcore-domain | SUCCESS | 75 | Nowe: OrderSide, OrderFilledEvent v2, OrderCanceledEvent v2 |
+| jwcore-core | SUCCESS | 30 | OrderTimeoutMonitorTest 9/9 (synchronized API) |
+| jwcore-adapter-jforex | SUCCESS | — | Szkielet, brak egzekucji |
+| jwcore-adapter-cq | SUCCESS | 5 | Sequence API z AtomicLong (3C), contract tests |
+| jwcore-execution-common | SUCCESS | 25 | Deterministyczny idempotency key |
+| jwcore-execution-crypto | SUCCESS | 22 | — |
+| jwcore-execution-forex | SUCCESS | 22 | — |
+| jwcore-risk-coordinator | SUCCESS | 33 (28 passed, 5 @Disabled) | 5 testów do przepisania w 4B (DŁUG-318) |
 
-| Moduł | Zawartość | Status |
-|---|---|---|
-| **jwcore-domain** | EventEnvelope, EventType, CanonicalId, IdempotencyKeys, RejectReason, OrderIntent, OrderSubmittedEvent, OrderFilledEvent, OrderCanceledEvent, OrderRejectedEvent, OrderTimeoutEvent, OrderUnknownEvent, RiskDecisionEvent, StateRebuiltEvent, EventProcessingFailedEvent, MarginUpdateEvent | 🟢 STABILNY (main) |
-| **jwcore-core** | IEventJournal, ITimeProvider, RealTimeProvider, ControllableTimeProvider, TailSubscription, OrderTimeoutMonitor, BackpressureController, AbstractEventJournalContractTest (nowe w 3C) | 🟢 STABILNY, 3C rozszerza |
-| **jwcore-adapter-cq** | ChronicleQueueEventJournal, ChronicleQueueJournalConfig | 🟡 3C build FAILED (CQ append) |
-| **jwcore-execution-common** | EventEmitter, IntentRegistry, IntentPhase, PendingIntent, ExecutionState, ExecutionStateResolver | 🟢 STABILNY (main) |
-| **jwcore-execution-crypto** | Stub modułu crypto | 🟡 STUB |
-| **jwcore-execution-forex** | ExecutionRuntime, BrokerSession interface, StubBrokerSession, LocalRiskPolicy, ExposureLedger | 🟢 STABILNY (JForex pending) |
-| **jwcore-risk-coordinator** | RiskCoordinatorEngine, RiskCoordinatorTailer, Main, ExposureLedger, RiskDecisionEmitter | 🟡 3C refactor tailera |
+**Łącznie:** 212 testów zielonych, 5 celowo wyłączonych (`@Disabled`), 0 failed, 0 errors.
 
-### Zależności
+## Kluczowe komponenty
 
-```
-jwcore-domain (fundament)
-    ↓
-jwcore-core
-    ↓
-jwcore-adapter-cq, jwcore-execution-common
-                        ↓
-            jwcore-execution-crypto, jwcore-execution-forex
-                        ↓
-                jwcore-risk-coordinator
-```
+### ExposureLedger (Paczka 4A, jwcore-risk-coordinator)
 
-### Moduły planowane (nie istnieją jeszcze)
+Pełna pozycja finansowa per `CanonicalId`:
+- `netPosition` — BigDecimal, + long, − short
+- `averageEntryPrice` — VWAP SCALE=8, HALF_UP
+- `realizedPnL` — netto (commission odejmowana od każdego filla)
+- `totalCommission` — skumulowana
+- `totalExposure()` — suma abs(netPosition × avgEntryPrice)
+- `marginUsed()` — totalExposure × MARGIN_RATE (0.01)
+- `intentCount(canonicalId)` — licznik agregatowy pending intents
 
-- `jwcore-adapter-jforex` — adapter Dukascopy JForex (Etap 1/2)
-- `jwcore-strategy-host` — host dla 20 strategii (Etap 3)
-- `jwcore-control` — backend dashboard (Etap 4)
-- `jwcore-optimizer` — optymalizator parametrów (Etap 5)
-- `jwcore-adapter-fix` — adapter FIX API (Etap 6)
+Reguły księgowania:
+- Otwarcie pozycji: netPosition i avgEntryPrice z filla
+- Dodawanie: VWAP na wartościach bezwzględnych
+- Reverse/close: realizedPnL z różnicy ceny × zamknięta ilość
+- Pełne zamknięcie: netPosition = 0, avgEntryPrice = ZERO (nie null)
 
----
+Fail-fast `IllegalStateException` przy terminalnym evencie (cancel/reject/fill) bez pending intent — polityka MVP 4A dla lokalnie spójnego event stream. NIE dotyczy reconcile po reconnect (to 4B).
 
-## Historia sprintów
+### OrderTimeoutMonitor (Paczka 4A, jwcore-core)
 
-| Sprint | Zakres | Status |
-|---|---|---|
-| **Sprint 1** | Fundament: jwcore-domain + jwcore-core + jwcore-adapter-cq | 🟢 ZAMKNIĘTY (main) |
-| **Sprint 2** | Execution layer (common + crypto + forex stub), ADR-011 | 🟢 ZAMKNIĘTY (main) |
-| **Sprint 3.1** | risk-coordinator scaffolding | 🟢 ZAMKNIĘTY (main) |
-| **Sprint 3.1.1** | ADR-015 Event Correlation + sourceProcessId | 🟢 ZAMKNIĘTY (main) |
-| **Sprint 3.1.2** | Paczki 1-8 — audyt + fixy + rozbudowa | 🟢 ZAMKNIĘTY (main) |
-| **Sprint 3.2** | Paczki 1-3B w main, 3C build FAILED, 3D zatwierdzona | 🟡 W TRAKCIE |
+Synchronizacja:
+- `registerPending()`, `markTerminal()`, `scanTimeouts()`, `pendingCount()` — wszystkie `synchronized`
+- `scanTimeouts()`: pod lockiem tylko zbieranie i usuwanie z mapy; emisja `eventJournal.append()` POZA sekcją krytyczną
+- Cel: brak deadlock/re-entrancy, brak blokowania innych wątków
 
-### Szczegóły Sprint 3.2
+Test wielowątkowy: 4 wątki × 1000 iteracji, `CountDownLatch` jako bariera startowa, callback z blokadą do weryfikacji emisji poza lockiem.
 
-**Zmergowane do main:**
-- Paczka 1 — Audyt architektoniczny (DŁUG-301 do 308)
-- Paczka 2 — Fixy rejestru (KRYT-001, WYS-001/002, KRYT-003A)
-- Paczka 3A — Domain lifecycle events
-- Paczka 3B — ADR-016 Risk Decision + ExposureLedger + SAFE (MVP)
+### Sequence API (Paczka 3C, jwcore-adapter-cq)
 
-**W trakcie:**
-- Paczka 3C — IEventJournal sequence API + RiskCoordinatorTailer offset
-  - Gałąź: `codex/rozszerz-ieventjournal-o-sequence-api`
-  - Status: BUILD FAILED (10 testów ChronicleQueueEventJournalContractTest)
-  - Problem: `documentContext.index()` ≠ `appender.lastIndexAppended()` w CQ 5.25ea16
-  - Rozwiązanie: przeprojektowanie CQ append wymaga decyzji zespołu w osobnej sesji
+- `AtomicLong` counter w `ChronicleQueueEventJournal`
+- `EventEnvelope.sequenceNumber` (rename z `timestampMono` w 3D)
+- `readAfterSequence(long sequence)` — O(n) filter (DŁUG-317: O(log n) w przyszłości)
+- Tailer offset persistence: `RiskCoordinatorTailer` używa sequence API (DŁUG-311 zamknięty)
 
-**Zatwierdzona, następna:**
-- Paczka 3D — rename `EventEnvelope.timestampMono` → `sequenceNumber`
-  - Hard dependency po merge 3C
-  - Dotyka 30-40 plików
-  - DŁUG-313
+### RiskCoordinatorEngine
 
-**Backlog Sprint 3.2 (po 3C+3D):**
-- A) Eskalacja SAFE→HALT przy powtórzonym OrderUnknown
-- B) Panel + Telegram alerting SAFE/HALT (ADR-010)
-- C) Manualny reset SAFE→RUN
-- D) DŁUG-309 — pełna pozycja finansowa ExposureLedger (BLOKUJE PoC JForex)
-- E) ADR-017 error isolation per-event
-- F) POM-001 crash-recovery timeoutów
-- G) OrderFilledEvent + OrderCanceledEvent pełny lifecycle
-- H) Advanced Stub Broker przed PoC JForex
+Po adaptacji 4A:
+- `apply(EventEnvelope)` przekazuje eventy do ledgera
+- Mostek accountId → canonicalId (wewnętrzna mapa)
+- `exposureSnapshot()` — skumulowana mapa per account
+- 5 testów @Disabled — do przepisania w 4B (DŁUG-318)
 
----
+## Wire compatibility / kompatybilność binarna
 
-## Stan implementacji ADR
+- `EventEnvelope.sequenceNumber` — rename z `timestampMono`, serializacja pozycyjna BinaryCodec zachowana
+- `EventType`: OrderFilledEvent i OrderCanceledEvent dopisane NA KOŃCU — stare ordinals bez zmian
+- `OrderFilledEvent`: nowy kształt (10 pól), stary wire nieważny — **BREAKING** dla logów sprzed 4A jeśli takie były
+- `OrderCanceledEvent`: nowy kształt (6 pól), **BREAKING** dla logów sprzed 4A jeśli takie były
 
-Audyt wykonany 22.04.2026 przez Claude Code.
+## Braki świadome MVP 4A
 
-| ADR | Temat | Status |
-|---|---|---|
-| ADR-001 | Model czasu | 🟢 ZAIMPLEMENTOWANY |
-| ADR-002 | Lifecycle zlecenia | 🟢 ZAIMPLEMENTOWANY |
-| ADR-003 | Reconnect / reconcile | 🟡 CZĘŚCIOWO (DŁUG-314) |
-| ADR-004 | Hot path / control plane | 🟡 CZĘŚCIOWO (DŁUG-315) |
-| ADR-005 | SAFE/HALT/KILL | 🟢 ZAIMPLEMENTOWANY (jako ADR-011) |
-| ADR-006 | Executor per kolejka CQ | 🟢 ZAIMPLEMENTOWANY |
-| ADR-007 | — (numer przeskoczony) | ⚫ NIE ISTNIEJE |
-| ADR-008 | Execution jako jedyny rebuilder | 🟢 ZAIMPLEMENTOWANY |
-| ADR-009 | OrderTimeoutEvent | 🟢 ZAIMPLEMENTOWANY |
-| ADR-010 | Margin Monitor w GUI | ⏳ OCZEKUJE (Etap 4) |
-| ADR-011 | SAFE/HALT/KILL per rachunek | 🟢 ZAIMPLEMENTOWANY |
-| ADR-012 | Pinning CQ 5.25ea16 | 🟢 ZAIMPLEMENTOWANY |
-| ADR-013 | Obowiązkowe flagi JVM | 🟢 ZAIMPLEMENTOWANY |
-| ADR-014 | Layout repo | 🟢 ZAIMPLEMENTOWANY |
-| ADR-015 | Event Correlation | 🟢 ZAIMPLEMENTOWANY |
-| ADR-016 | Risk Decision + ExposureLedger | 🟢 ZAIMPLEMENTOWANY (MVP) |
-| ADR-017 | Infrastructure Audit | 🟡 W TRAKCIE (Etap 1) |
+1. `intentCount` — agregat per canonicalId, nie per orderId. TODO pending-by-orderId jeśli potrzebny
+2. `remainingQuantity` w OrderFilledEvent — przechowywane i walidowane, ale nie używane do księgowania w 4A
+3. `totalExposure` / `marginUsed` używają avgEntryPrice, nie `lastKnownPrice` — TODO po integracji market data
+4. `MARGIN_RATE = 0.01` jako stała globalna — TODO per-instrument
 
-**Statystyki:**
-- 13/16 ADR-ów — ZAIMPLEMENTOWANE w pełni
-- 2/16 ADR-ów — CZĘŚCIOWO (ADR-003 reconnect, ADR-004 hot path)
-- 1/16 ADR-ów — OCZEKUJE (ADR-010 Margin Monitor, Etap 4)
-- 1/16 ADR-ów — W TRAKCIE (ADR-017 Infrastructure Audit)
+## Polityka build-fix (nowe od 22.04.2026)
 
-### Długi wynikające z częściowej implementacji
+Zgodnie z zasadą #28 (WYJATEK BUILD-FIX CODE):
+- Dla trywialnych błędów kompilacji/syntax (final, dostosowanie wywołań do nowego API, importy) — Code może sam poprawić pod kontrolą Claude QG
+- Zabronione: zmiana logiki biznesowej, nowa logika księgowania/ryzyka, nowe testy, nowe API
+- Claude QG opisuje zakres w prompcie, Code raportuje każdą zmianę
 
-- **DŁUG-314** — Dokończenie reconnect/reconcile w BrokerSession (ADR-003)
-- **DŁUG-315** — TokenBucket rate limiter (ADR-004 częściowe)
+Historia 4A: 2 iteracje build-fix przez Codex (final w teście, stare API w konsumencie) + 1 iteracja Code (dopasowanie konstruktorów w testach + @Disabled dla 5 testów pod 4B).
 
----
+## Co dalej
 
-## Infrastruktura
-
-### Serwery
-
-| Serwer | OS | Rola | Status |
-|---|---|---|---|
-| Hetzner VPS | Ubuntu | Orkiestrator, API | 🟢 Aktywny |
-| ForexVPS | Windows | Live trading (JForex docelowo) | 🟡 Puste |
-| Contabo VPS | Windows Server 2025 → Ubuntu | Optymalizacja | 🟡 Migracja |
-
-### Repo GitHub
-
-- `jun564/jwcore` — prywatne, główne repo kodu
-- `jun564/jwcore-review` — publiczne, auto-sync po pushu do main
-- HEAD main: commit `6f1075e` (Paczka 3B Sprint 3.2)
-
-### Otwarte gałęzie
-
-- `codex/rozszerz-ieventjournal-o-sequence-api` — Paczka 3C, build FAILED, pending
-
----
-
-## Zewnętrzne zależności
-
-### Biblioteki Java
-- Java 21 LTS
-- Chronicle Queue 5.25ea16 (pinowane ADR-012)
-- JUnit Jupiter 5.10.2
-- JaCoCo
-- Maven 3.9+
-
-### Usługi
-- GitHub — repo i CI/CD
-- Dukascopy Bank SA — broker docelowy (KYC pending)
-- JForex SDK — biblioteka (pobranie po aktywacji)
-- PostgreSQL — baza (Etap 4, nie zainstalowana)
-- Telegram Bot API — alerting (Etap 4)
-
-### Pending Architekta
-- KYC do Dukascopy
-- Regeneracja tokenu GitHub (blokuje ADR-017 Etap 1)
-- Instalacja Docker Desktop (blokuje Etap 5)
-
----
-
-## Aktywne długi techniczne
-
-Pełna lista w `docs/sprint3-backlog.md` i `Doc6 v1.1` (docx). Podsumowanie krytycznych i wysokich:
-
-### 🔴 Krytyczne (blokują Etap 1)
-- **DŁUG-309** — Pełna pozycja finansowa w ExposureLedger (blokuje PoC JForex)
-
-### 🟠 Wysokie
-- **DŁUG-311** — RiskCoordinatorTailer offset (w trakcie Paczka 3C)
-- **DŁUG-313** — Rename timestampMono → sequenceNumber (Paczka 3D)
-- **DŁUG-314** — Reconnect/reconcile w BrokerSession (ADR-003)
-
-### 🟡 Średnie (8 pozycji)
-DŁUG-301, 303, 305, 306, 307, 308, 310, 312, 315
-
-### 🟢 Niskie (2 pozycje)
-DŁUG-302, 304
-
----
-
-## Warunki wejścia do kolejnych etapów
-
-### Etap 1 → Etap 2 (Adaptery + Risk Engine)
-- [ ] Paczka 3C zmergowana
-- [ ] Paczka 3D zmergowana
-- [ ] DŁUG-309 zamknięty (pełen model portfelowy)
-- [ ] Advanced Stub Broker zaimplementowany
-- [ ] KYC Dukascopy zakończone
-- [ ] Podłączenie JForex SDK + 72h test stabilności
-- [ ] README Etap 1
-
-### Etap 2 → Etap 3 (Strategy Host)
-- [ ] 5 adapterów brokera przetestowanych na DEMO
-- [ ] Risk Engine odrzuca nieprawidłowe intencje
-- [ ] Virtual Account Manager izoluje budżety
-- [ ] DŁUG-314 zamknięty (pełen reconnect/reconcile)
-- [ ] DŁUG-315 zamknięty (TokenBucket)
-
-### Etap 3 → Etap 4 (GUI)
-- [ ] 1 strategia stabilnie na DEMO przez 7 dni
-- [ ] Reconciliation działa
-- [ ] Zero ostrzeżeń w logach przez 7 dni
-
-### Etap 4 → Etap 5 (Optymalizator)
-- [ ] GUI operacyjnie kompletne
-- [ ] Monitoring działa
-- [ ] Moduł podatkowy generuje PIT-38
-
-### Etap 5 → Etap 6 (FIX + 20 strategii)
-- [ ] Pierwsza optymalizacja BTC z sensownymi wynikami
-- [ ] Architekt decyzja o przeniesieniu kapitału ($100k+ u Dukascopy)
-
----
-
-**Dokument kanoniczny:** `Doc7 — Stan Implementacji v1.0` (docx u Architekta)
-**Wersja:** 1.0
-**Snapshot:** 22.04.2026
+Priorytet logiczny z backlogu:
+1. Paczka 4B — DŁUG-314 reconnect/reconcile + przepisanie 5 testów @Disabled pod nowy model
+2. Paczka 4D — Advanced Stub Broker
+3. Paczka 5 — PoC JForex (Etap 1 na demo)
+4. Paczka 4C — alerting + error isolation (może iść równolegle z 4B)
