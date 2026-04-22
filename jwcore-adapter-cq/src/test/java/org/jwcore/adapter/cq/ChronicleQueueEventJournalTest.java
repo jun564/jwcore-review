@@ -51,7 +51,7 @@ class ChronicleQueueEventJournalTest {
                     Thread.sleep(10L);
                 }
                 assertFalse(observed.isEmpty());
-                assertEquals(sequence, observed.getFirst().timestampMono());
+                assertEquals(sequence, observed.getFirst().sequenceNumber());
             } finally {
                 subscription.close();
             }

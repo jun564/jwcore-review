@@ -21,7 +21,7 @@ public final class InMemoryEventJournal implements IEventJournal {
         return events.stream().filter(e -> !e.timestampEvent().isBefore(fromInclusive) && e.timestampEvent().isBefore(toExclusive)).toList();
     }
     @Override public long currentSequence() { return sequence.get(); }
-    @Override public List<EventEnvelope> readAfterSequence(final long since) { return events.stream().filter(e -> e.timestampMono() > since).sorted(Comparator.comparingLong(EventEnvelope::timestampMono)).toList(); }
+    @Override public List<EventEnvelope> readAfterSequence(final long since) { return events.stream().filter(e -> e.sequenceNumber() > since).sorted(Comparator.comparingLong(EventEnvelope::sequenceNumber)).toList(); }
     @Override public TailSubscription tail(final Consumer<EventEnvelope> consumer) { consumers.add(consumer); return () -> consumers.remove(consumer); }
     public List<EventEnvelope> all() { return List.copyOf(events); }
 

@@ -87,8 +87,8 @@ class OrderTimeoutMonitorTest {
 
         @Override
         public List<EventEnvelope> readAfterSequence(final long since) {
-            return events.stream().filter(e -> e.timestampMono() > since)
-                    .sorted(Comparator.comparingLong(EventEnvelope::timestampMono))
+            return events.stream().filter(e -> e.sequenceNumber() > since)
+                    .sorted(Comparator.comparingLong(EventEnvelope::sequenceNumber))
                     .toList();
         }
 

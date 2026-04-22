@@ -46,11 +46,11 @@ public abstract class AbstractEventJournalContractTest {
 
             final List<EventEnvelope> result = journal.readAfterSequence(first);
             assertEquals(2, result.size());
-            assertTrue(result.get(0).timestampMono() > first);
-            assertTrue(result.get(1).timestampMono() > first);
-            assertTrue(result.get(1).timestampMono() > result.get(0).timestampMono());
-            assertEquals(second, result.get(0).timestampMono());
-            assertEquals(third, result.get(1).timestampMono());
+            assertTrue(result.get(0).sequenceNumber() > first);
+            assertTrue(result.get(1).sequenceNumber() > first);
+            assertTrue(result.get(1).sequenceNumber() > result.get(0).sequenceNumber());
+            assertEquals(second, result.get(0).sequenceNumber());
+            assertEquals(third, result.get(1).sequenceNumber());
         } finally {
             closeQuietly(journal);
         }

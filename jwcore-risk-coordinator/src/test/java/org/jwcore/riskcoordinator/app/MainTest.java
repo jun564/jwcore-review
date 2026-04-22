@@ -144,8 +144,8 @@ class MainTest {
 
         @Override
         public List<EventEnvelope> readAfterSequence(final long since) {
-            return events.stream().filter(e -> e.timestampMono() > since)
-                    .sorted(java.util.Comparator.comparingLong(EventEnvelope::timestampMono))
+            return events.stream().filter(e -> e.sequenceNumber() > since)
+                    .sorted(java.util.Comparator.comparingLong(EventEnvelope::sequenceNumber))
                     .toList();
         }
 
