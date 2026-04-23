@@ -36,7 +36,8 @@ class RiskCoordinatorEngineTest {
         engine.apply(intent("crypto", 10.0));
         engine.apply(filled("crypto", OrderSide.BUY, "10", "100", "1"));
 
-        assertEquals(new BigDecimal("1000.00000000"), engine.exposureSnapshot().get("crypto"));
+        assertEquals(0, new BigDecimal("1000.00000000").compareTo(engine.exposureSnapshot().get("crypto")),
+                "exposure after fill");
         assertEquals(ExecutionState.RUN, engine.currentStates().getOrDefault("crypto", ExecutionState.RUN));
     }
 
@@ -51,7 +52,8 @@ class RiskCoordinatorEngineTest {
         engine.apply(intent("crypto", 4.0));
         engine.apply(filled("crypto", OrderSide.SELL, "4", "110", "1"));
 
-        assertEquals(new BigDecimal("600.00000000"), engine.exposureSnapshot().get("crypto"));
+        assertEquals(0, new BigDecimal("600.00000000").compareTo(engine.exposureSnapshot().get("crypto")),
+                "exposure after partial close");
         assertEquals(ExecutionState.RUN, engine.currentStates().getOrDefault("crypto", ExecutionState.RUN));
     }
 
@@ -66,7 +68,8 @@ class RiskCoordinatorEngineTest {
         engine.apply(intent("crypto", 5.0));
         engine.apply(canceled("crypto"));
 
-        assertEquals(new BigDecimal("1000.00000000"), engine.exposureSnapshot().get("crypto"));
+        assertEquals(0, new BigDecimal("1000.00000000").compareTo(engine.exposureSnapshot().get("crypto")),
+                "exposure kept after cancel post-fill");
         assertEquals(ExecutionState.RUN, engine.currentStates().getOrDefault("crypto", ExecutionState.RUN));
     }
 
@@ -79,7 +82,8 @@ class RiskCoordinatorEngineTest {
 
         engine.apply(unknown("crypto"));
 
-        assertEquals(new BigDecimal("1000.00000000"), engine.exposureSnapshot().get("crypto"));
+        assertEquals(0, new BigDecimal("1000.00000000").compareTo(engine.exposureSnapshot().get("crypto")),
+                "exposure unchanged on OrderUnknown");
         assertEquals(ExecutionState.SAFE, engine.currentStates().get("crypto"));
     }
 
