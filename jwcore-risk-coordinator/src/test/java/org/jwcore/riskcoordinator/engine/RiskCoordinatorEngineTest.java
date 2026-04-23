@@ -5,6 +5,7 @@ import org.jwcore.domain.EventEnvelope;
 import org.jwcore.domain.EventType;
 import org.jwcore.domain.IdempotencyKeys;
 import org.jwcore.domain.OrderSide;
+import org.jwcore.domain.events.OrderIntentEvent;
 import org.jwcore.domain.events.OrderCanceledEvent;
 import org.jwcore.domain.events.OrderFilledEvent;
 import org.jwcore.domain.events.OrderSubmittedEvent;
@@ -25,50 +26,60 @@ import java.util.logging.Logger;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import org.junit.jupiter.api.Disabled;
 
 class RiskCoordinatorEngineTest {
-    @Disabled("TODO Paczka 4B: przepisac pod nowy model exposure z ledgera (intent+fill zamiast submitted)")
     @Test
-    void shouldAddExposureOnOrderSubmitted() {
+    void shouldCalculateExposureFromFill() {
         final RiskCoordinatorEngine engine = new RiskCoordinatorEngine("risk-node-1");
 
-        engine.apply(submitted("crypto", 100.0));
+        engine.apply(submitted("crypto", 10.0));
+        engine.apply(intent("crypto", 10.0));
+        engine.apply(filled("crypto", OrderSide.BUY, "10", "100", "1"));
 
-        assertEquals(new BigDecimal("100.0"), engine.exposureSnapshot().get("crypto"));
+        assertEquals(new BigDecimal("1000.00000000"), engine.exposureSnapshot().get("crypto"));
+        assertEquals(ExecutionState.RUN, engine.currentStates().getOrDefault("crypto", ExecutionState.RUN));
     }
 
-    @Disabled("TODO Paczka 4B: przepisac pod nowy model exposure z ledgera (intent+fill zamiast submitted)")
     @Test
-    void shouldSubtractExposureOnOrderFilled() {
+    void shouldReduceExposureOnPartialClose() {
         final RiskCoordinatorEngine engine = new RiskCoordinatorEngine("risk-node-1");
-        engine.apply(submitted("crypto", 100.0));
+        engine.apply(submitted("crypto", 10.0));
+        engine.apply(intent("crypto", 10.0));
+        engine.apply(filled("crypto", OrderSide.BUY, "10", "100", "1"));
 
-        engine.apply(filled("crypto", "40"));
+        engine.apply(submitted("crypto", 4.0));
+        engine.apply(intent("crypto", 4.0));
+        engine.apply(filled("crypto", OrderSide.SELL, "4", "110", "1"));
 
-        assertEquals(new BigDecimal("60.0"), engine.exposureSnapshot().get("crypto"));
+        assertEquals(new BigDecimal("600.00000000"), engine.exposureSnapshot().get("crypto"));
+        assertEquals(ExecutionState.RUN, engine.currentStates().getOrDefault("crypto", ExecutionState.RUN));
     }
 
-    @Disabled("TODO Paczka 4B: przepisac pod nowy model exposure z ledgera (intent+fill zamiast submitted)")
     @Test
-    void shouldSubtractExposureOnOrderCanceled() {
+    void shouldKeepExposureOnCancelAfterFill() {
         final RiskCoordinatorEngine engine = new RiskCoordinatorEngine("risk-node-1");
-        engine.apply(submitted("crypto", 100.0));
+        engine.apply(submitted("crypto", 10.0));
+        engine.apply(intent("crypto", 10.0));
+        engine.apply(filled("crypto", OrderSide.BUY, "10", "100", "1"));
 
-        engine.apply(canceled("crypto", "30"));
+        engine.apply(submitted("crypto", 5.0));
+        engine.apply(intent("crypto", 5.0));
+        engine.apply(canceled("crypto"));
 
-        assertEquals(new BigDecimal("70.0"), engine.exposureSnapshot().get("crypto"));
+        assertEquals(new BigDecimal("1000.00000000"), engine.exposureSnapshot().get("crypto"));
+        assertEquals(ExecutionState.RUN, engine.currentStates().getOrDefault("crypto", ExecutionState.RUN));
     }
 
-    @Disabled("TODO Paczka 4B: przepisac pod nowy model exposure z ledgera (intent+fill zamiast submitted)")
     @Test
     void shouldNotChangeExposureOnOrderUnknown() {
         final RiskCoordinatorEngine engine = new RiskCoordinatorEngine("risk-node-1");
-        engine.apply(submitted("crypto", 100.0));
+        engine.apply(submitted("crypto", 10.0));
+        engine.apply(intent("crypto", 10.0));
+        engine.apply(filled("crypto", OrderSide.BUY, "10", "100", "1"));
 
         engine.apply(unknown("crypto"));
 
-        assertEquals(new BigDecimal("100.0"), engine.exposureSnapshot().get("crypto"));
+        assertEquals(new BigDecimal("1000.00000000"), engine.exposureSnapshot().get("crypto"));
         assertEquals(ExecutionState.SAFE, engine.currentStates().get("crypto"));
     }
 
@@ -158,17 +169,22 @@ class RiskCoordinatorEngineTest {
         }
     }
 
-    @Disabled("TODO Paczka 4B: przepisac pod nowy model exposure z ledgera (intent+fill zamiast submitted)")
     @Test
     void shouldFullLifecycleSequence() {
         final RiskCoordinatorEngine engine = new RiskCoordinatorEngine("risk-node-1");
 
-        engine.apply(submitted("crypto", 100.0));
-        engine.apply(submitted("crypto", 50.0));
-        engine.apply(filled("crypto", "100"));
+        engine.apply(submitted("crypto", 10.0));
+        engine.apply(intent("crypto", 10.0));
+        engine.apply(filled("crypto", OrderSide.BUY, "10", "100", "1"));
+        engine.apply(submitted("crypto", 10.0));
+        engine.apply(intent("crypto", 10.0));
+        engine.apply(filled("crypto", OrderSide.SELL, "10", "105", "1"));
+        engine.apply(submitted("crypto", 5.0));
+        engine.apply(intent("crypto", 5.0));
+        engine.apply(canceled("crypto"));
         engine.apply(unknown("crypto"));
 
-        assertEquals(new BigDecimal("50.0"), engine.exposureSnapshot().get("crypto"));
+        assertEquals(BigDecimal.ZERO, engine.exposureSnapshot().get("crypto"));
         assertEquals(ExecutionState.SAFE, engine.currentStates().get("crypto"));
     }
 
@@ -176,12 +192,13 @@ class RiskCoordinatorEngineTest {
     void shouldLogWarningWhenFilledWouldDriveExposureBelowZero() {
         final RiskCoordinatorEngine engine = new RiskCoordinatorEngine("risk-node-1");
         engine.apply(submitted("crypto", 10.0));
+        engine.apply(intent("crypto", 10.0));
 
         final TestHandler handler = new TestHandler();
         final Logger logger = Logger.getLogger(RiskCoordinatorEngine.class.getName());
         logger.addHandler(handler);
         try {
-            engine.apply(filled("crypto", "30"));
+            engine.apply(filled("crypto", OrderSide.BUY, "30", "1", "0"));
         } finally {
             logger.removeHandler(handler);
         }
@@ -203,15 +220,24 @@ class RiskCoordinatorEngineTest {
         return envelope(EventType.OrderSubmittedEvent, event.toPayload());
     }
 
-    private static EventEnvelope filled(final String accountId, final String size) {
+    private static EventEnvelope intent(final String accountId, final double size) {
+        final OrderIntentEvent event = new OrderIntentEvent(accountId, new org.jwcore.domain.Instrument("BTC-USD"), size);
+        return envelope(EventType.OrderIntentEvent, CanonicalId.parse("S07:I03:VA07-03:BA01"), event.toPayload());
+    }
+
+    private static EventEnvelope filled(final String accountId,
+                                        final OrderSide side,
+                                        final String size,
+                                        final String averagePrice,
+                                        final String commission) {
         final OrderFilledEvent event = new OrderFilledEvent(
                 UUID.randomUUID().toString(),
                 "BROKER-1",
                 CanonicalId.parse("S07:I03:VA07-03:BA01"),
-                OrderSide.BUY,
+                side,
                 new BigDecimal(size),
-                BigDecimal.ONE,
-                BigDecimal.ZERO,
+                new BigDecimal(averagePrice),
+                new BigDecimal(commission),
                 Instant.parse("2026-04-20T10:00:00Z"),
                 BigDecimal.ZERO,
                 null
@@ -219,7 +245,7 @@ class RiskCoordinatorEngineTest {
         return envelope(EventType.OrderFilledEvent, event.toPayload());
     }
 
-    private static EventEnvelope canceled(final String accountId, final String size) {
+    private static EventEnvelope canceled(final String accountId) {
         final OrderCanceledEvent event = new OrderCanceledEvent(
                 UUID.randomUUID().toString(),
                 "BROKER-1",
@@ -243,12 +269,16 @@ class RiskCoordinatorEngineTest {
     }
 
     private static EventEnvelope envelope(final EventType type, final byte[] payload) {
+        return envelope(type, null, payload);
+    }
+
+    private static EventEnvelope envelope(final EventType type, final CanonicalId canonicalId, final byte[] payload) {
         return new EventEnvelope(
                 UUID.randomUUID(),
                 type,
                 null,
                 null,
-                null,
+                canonicalId,
                 IdempotencyKeys.generate(null, type, payload),
                 1L,
                 Instant.parse("2026-04-19T08:00:00Z"),
