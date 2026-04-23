@@ -1,20 +1,27 @@
 package org.jwcore.riskcoordinator.engine;
 
+import org.jwcore.core.time.ITimeProvider;
+import org.jwcore.core.time.RealTimeProvider;
 import org.jwcore.domain.CanonicalId;
 import org.jwcore.domain.EventEnvelope;
 import org.jwcore.domain.EventType;
 import org.jwcore.domain.events.OrderCanceledEvent;
 import org.jwcore.domain.events.OrderFilledEvent;
+import org.jwcore.domain.events.OrderIntentEvent;
 import org.jwcore.domain.events.OrderRejectedEvent;
 import org.jwcore.domain.events.OrderSubmittedEvent;
 import org.jwcore.domain.events.OrderUnknownEvent;
 import org.jwcore.execution.common.events.RiskDecisionEvent;
 import org.jwcore.execution.common.state.ExecutionState;
+import org.jwcore.riskcoordinator.command.RiskStateResetCommand;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -32,21 +39,42 @@ public final class RiskCoordinatorEngine {
 
     private final ExposureLedger exposureLedger;
     private final String sourceProcessId;
+    private final ITimeProvider timeProvider;
+    private final int haltThresholdCount;
+    private final Duration haltWindowDuration;
     private final AtomicReference<Map<String, ExecutionState>> accountStates = new AtomicReference<>(Map.of());
     private final AtomicReference<Map<String, ExecutionState>> lastEmittedStates = new AtomicReference<>(Map.of());
     private final AtomicReference<Map<String, CanonicalId>> canonicalByAccount = new AtomicReference<>(Map.of());
     private final AtomicReference<Map<String, java.math.BigDecimal>> exposureByAccount = new AtomicReference<>(Map.of());
+    private final AtomicReference<Map<CanonicalId, Deque<Instant>>> unknownTimestamps = new AtomicReference<>(Map.of());
 
     public RiskCoordinatorEngine(final String sourceProcessId) {
-        this(new ExposureLedger(), sourceProcessId);
+        this(new ExposureLedger(), sourceProcessId, new RealTimeProvider(), 3, Duration.ofSeconds(60));
     }
 
     public RiskCoordinatorEngine(final ExposureLedger exposureLedger, final String sourceProcessId) {
+        this(exposureLedger, sourceProcessId, new RealTimeProvider(), 3, Duration.ofSeconds(60));
+    }
+
+    public RiskCoordinatorEngine(final ExposureLedger exposureLedger,
+                                 final String sourceProcessId,
+                                 final ITimeProvider timeProvider,
+                                 final int haltThresholdCount,
+                                 final Duration haltWindowDuration) {
         this.exposureLedger = Objects.requireNonNull(exposureLedger, "exposureLedger cannot be null");
         this.sourceProcessId = Objects.requireNonNull(sourceProcessId, "sourceProcessId cannot be null");
+        this.timeProvider = Objects.requireNonNull(timeProvider, "timeProvider cannot be null");
         if (sourceProcessId.isBlank()) {
             throw new IllegalArgumentException("sourceProcessId cannot be blank");
         }
+        if (haltThresholdCount <= 0) {
+            throw new IllegalArgumentException("haltThresholdCount must be positive");
+        }
+        if (haltWindowDuration.isNegative() || haltWindowDuration.isZero()) {
+            throw new IllegalArgumentException("haltWindowDuration must be positive");
+        }
+        this.haltThresholdCount = haltThresholdCount;
+        this.haltWindowDuration = haltWindowDuration;
     }
 
     public Set<String> apply(final EventEnvelope envelope) {
@@ -59,12 +87,20 @@ public final class RiskCoordinatorEngine {
                 return Set.of(event.accountId());
             }
             if (envelope.eventType() == EventType.OrderIntentEvent) {
+                final OrderIntentEvent event = OrderIntentEvent.fromPayload(envelope.payload());
+                final String accountId = event.accountId();
+                if (isHalted(accountId)) {
+                    return Set.of(accountId);
+                }
                 exposureLedger.apply(envelope);
-                return Set.of();
+                return Set.of(accountId);
             }
             if (envelope.eventType() == EventType.OrderFilledEvent) {
                 final OrderFilledEvent event = OrderFilledEvent.fromPayload(envelope.payload());
                 final String accountId = resolveAccountId(event.canonicalId());
+                if (isHalted(accountId)) {
+                    return Set.of(accountId);
+                }
                 bindCanonicalToAccount(accountId, event.canonicalId());
                 exposureLedger.apply(envelope);
                 recomputeExposure(accountId);
@@ -73,6 +109,9 @@ public final class RiskCoordinatorEngine {
             if (envelope.eventType() == EventType.OrderCanceledEvent) {
                 final OrderCanceledEvent event = OrderCanceledEvent.fromPayload(envelope.payload());
                 final String accountId = resolveAccountId(event.canonicalId());
+                if (isHalted(accountId)) {
+                    return Set.of(accountId);
+                }
                 bindCanonicalToAccount(accountId, event.canonicalId());
                 exposureLedger.apply(envelope);
                 recomputeExposure(accountId);
@@ -80,14 +119,21 @@ public final class RiskCoordinatorEngine {
             }
             if (envelope.eventType() == EventType.OrderRejectedEvent) {
                 final OrderRejectedEvent event = OrderRejectedEvent.fromPayload(envelope.payload());
-                exposureLedger.apply(envelope);
                 final String accountId = envelope.canonicalId() == null ? event.accountId() : resolveAccountId(envelope.canonicalId());
+                if (isHalted(accountId)) {
+                    return Set.of(accountId);
+                }
+                exposureLedger.apply(envelope);
                 recomputeExposure(accountId);
                 return Set.of(accountId);
             }
             if (envelope.eventType() == EventType.OrderUnknownEvent) {
                 final OrderUnknownEvent event = OrderUnknownEvent.fromPayload(envelope.payload());
                 setAccountState(event.accountId(), ExecutionState.SAFE);
+                final CanonicalId canonicalId = canonicalByAccount.get().get(event.accountId());
+                if (canonicalId != null) {
+                    trackUnknownAndMaybeEscalate(event.accountId(), canonicalId);
+                }
                 return Set.of(event.accountId());
             }
             return Set.of();
@@ -207,6 +253,47 @@ public final class RiskCoordinatorEngine {
             return REASON_ORDER_UNKNOWN;
         }
         return REASON_DEFAULT_RUN + ":exposure=" + exposureByAccount.get().getOrDefault(accountId, java.math.BigDecimal.ZERO).toPlainString();
+    }
+
+    private boolean isHalted(final String accountId) {
+        return accountStates.get().getOrDefault(accountId, ExecutionState.RUN) == ExecutionState.HALT;
+    }
+
+    private void trackUnknownAndMaybeEscalate(final String accountId, final CanonicalId canonicalId) {
+        final Instant now = timeProvider.eventTime();
+        final Instant windowStart = now.minus(haltWindowDuration);
+        final Map<CanonicalId, Deque<Instant>> updated = new HashMap<>(unknownTimestamps.get());
+        final Deque<Instant> deque = new ArrayDeque<>(updated.getOrDefault(canonicalId, new ArrayDeque<>()));
+        deque.addLast(now);
+        while (!deque.isEmpty() && deque.peekFirst().isBefore(windowStart)) {
+            deque.removeFirst();
+        }
+        if (deque.size() >= haltThresholdCount
+                && accountStates.get().getOrDefault(accountId, ExecutionState.RUN) == ExecutionState.SAFE) {
+            setAccountState(accountId, ExecutionState.HALT);
+        }
+        updated.put(canonicalId, deque);
+        unknownTimestamps.set(updated);
+    }
+
+    private void clearUnknownWindow(final CanonicalId canonicalId) {
+        final Map<CanonicalId, Deque<Instant>> updated = new HashMap<>(unknownTimestamps.get());
+        updated.remove(canonicalId);
+        unknownTimestamps.set(updated);
+    }
+
+    public void executeResetCommand(final RiskStateResetCommand command) {
+        Objects.requireNonNull(command, "command cannot be null");
+        final String accountId = resolveAccountId(command.canonicalId());
+        final ExecutionState currentState = accountStates.get().getOrDefault(accountId, ExecutionState.RUN);
+        if (currentState != ExecutionState.SAFE && currentState != ExecutionState.HALT) {
+            LOGGER.warning(() -> "Reset from state " + currentState + " ignored for accountId=" + accountId);
+            return;
+        }
+        setAccountState(accountId, ExecutionState.RUN);
+        clearUnknownWindow(command.canonicalId());
+        LOGGER.info(() -> "Manual risk reset to RUN for accountId=" + accountId
+                + ", operatorId=" + command.operatorId() + ", reason=" + command.reason());
     }
 
     private static void validateAccountId(final String accountId) {
