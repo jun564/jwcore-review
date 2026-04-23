@@ -206,23 +206,26 @@ class ExecutionRuntimeTest {
     }
 
     @Test
-    void shouldFollowRunHaltSafeRunSequenceAcrossRiskDecisions() {
+    void shouldRequireRunDecisionToExitHalt() {
         final var journal = new InMemoryEventJournal();
         final var time = new ControllableTimeProvider(1L, Instant.parse("2026-04-19T08:00:00Z"));
         final var brokerSession = new StubBrokerSession();
         final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.RUN, 5, 30, 10, 100_000);
         final EventEmitter emitter = new EventEmitter(journal, time);
 
+        // 1. Runtime wchodzi w HALT po decyzji risk-coordinator
         journal.append(emitter.createRiskDecisionEvent("forex", ExecutionState.HALT, "halt").envelope());
         runtime.tickCycle();
         assertEquals(ExecutionState.HALT, runtime.currentState());
 
-        journal.append(emitter.createRiskDecisionEvent("forex", ExecutionState.SAFE, "step down").envelope());
+        // 2. Po 4C1 SAFE decyzja NIE moze zdjac HALT - HALT to full freeze
+        journal.append(emitter.createRiskDecisionEvent("forex", ExecutionState.SAFE, "step down ignored").envelope());
         time.advanceBy(Duration.ofMillis(1));
         runtime.tickCycle();
-        assertEquals(ExecutionState.SAFE, runtime.currentState());
+        assertEquals(ExecutionState.HALT, runtime.currentState(), "SAFE decision must not downgrade HALT after 4C1");
 
-        journal.append(emitter.createRiskDecisionEvent("forex", ExecutionState.RUN, "resume").envelope());
+        // 3. Wyjscie z HALT tylko przez RiskDecisionEvent(RUN) (typowo po manualnym RiskStateResetCommand)
+        journal.append(emitter.createRiskDecisionEvent("forex", ExecutionState.RUN, "resume after reset").envelope());
         time.advanceBy(Duration.ofMillis(1));
         runtime.tickCycle();
         assertEquals(ExecutionState.RUN, runtime.currentState());

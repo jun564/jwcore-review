@@ -97,7 +97,15 @@ public final class ExecutionRuntime {
             }
             final RiskDecisionEvent riskDecisionEvent = eventEmitter.parseRiskDecisionEvent(envelope);
             if (riskDecisionEvent.appliesTo(config.accountId())) {
-                decision = decision.moreRestrictive(riskDecisionEvent.desiredState());
+                final ExecutionState newState = riskDecisionEvent.desiredState();
+                final ExecutionState merged = decision.moreRestrictive(newState);
+                if (merged == decision && newState != decision) {
+                    final String reason = riskDecisionEvent.reason();
+                    final ExecutionState current = decision;
+                    LOGGER.warning(() -> "Ignored less restrictive risk decision: current=" + current
+                            + ", incoming=" + newState + ", reason=" + reason);
+                }
+                decision = merged;
             }
         }
         return decision;
