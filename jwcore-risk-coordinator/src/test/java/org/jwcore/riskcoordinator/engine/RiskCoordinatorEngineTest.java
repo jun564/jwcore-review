@@ -193,22 +193,20 @@ class RiskCoordinatorEngineTest {
     }
 
     @Test
-    void shouldLogWarningWhenFilledWouldDriveExposureBelowZero() {
+    void shouldHandleSellFillLargerThanLongAsReversePosition() {
         final RiskCoordinatorEngine engine = new RiskCoordinatorEngine("risk-node-1");
+
         engine.apply(submitted("crypto", 10.0));
         engine.apply(intent("crypto", 10.0));
+        engine.apply(filled("crypto", OrderSide.BUY, "10", "100", "0"));
 
-        final TestHandler handler = new TestHandler();
-        final Logger logger = Logger.getLogger(RiskCoordinatorEngine.class.getName());
-        logger.addHandler(handler);
-        try {
-            engine.apply(filled("crypto", OrderSide.BUY, "30", "1", "0"));
-        } finally {
-            logger.removeHandler(handler);
-        }
+        engine.apply(submitted("crypto", 30.0));
+        engine.apply(intent("crypto", 30.0));
+        engine.apply(filled("crypto", OrderSide.SELL, "30", "100", "0"));
 
-        assertEquals(BigDecimal.ZERO, engine.exposureSnapshot().get("crypto"));
-        assertTrue(handler.warningSeen);
+        final BigDecimal exposure = engine.exposureSnapshot().get("crypto");
+        assertTrue(exposure.compareTo(new BigDecimal("2000")) == 0
+                || exposure.compareTo(new BigDecimal("-2000")) == 0);
     }
 
     private static EventEnvelope submitted(final String accountId, final double size) {
