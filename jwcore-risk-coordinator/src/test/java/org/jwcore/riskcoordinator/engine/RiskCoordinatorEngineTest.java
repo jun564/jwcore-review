@@ -11,9 +11,12 @@ import org.jwcore.domain.events.OrderFilledEvent;
 import org.jwcore.domain.events.OrderSubmittedEvent;
 import org.jwcore.domain.events.OrderUnknownEvent;
 import org.jwcore.execution.common.state.ExecutionState;
+import org.jwcore.core.time.ControllableTimeProvider;
+import org.jwcore.riskcoordinator.command.RiskStateResetCommand;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Set;
@@ -207,6 +210,83 @@ class RiskCoordinatorEngineTest {
         final BigDecimal exposure = engine.exposureSnapshot().get("crypto");
         assertTrue(exposure.compareTo(new BigDecimal("2000")) == 0
                 || exposure.compareTo(new BigDecimal("-2000")) == 0);
+    }
+
+
+    @Test
+    void shouldEscalateToHaltAfter3Unknowns() {
+        final ControllableTimeProvider time = new ControllableTimeProvider(0L, Instant.parse("2026-04-23T10:00:00Z"));
+        final RiskCoordinatorEngine engine = new RiskCoordinatorEngine(
+                new ExposureLedger(), "risk-node-1", time, 3, Duration.ofSeconds(60));
+
+        engine.apply(submitted("crypto", 10.0));
+        engine.apply(unknown("crypto"));
+        time.advanceBy(Duration.ofSeconds(10));
+        engine.apply(unknown("crypto"));
+        time.advanceBy(Duration.ofSeconds(10));
+        engine.apply(unknown("crypto"));
+
+        assertEquals(ExecutionState.HALT, engine.currentStates().get("crypto"));
+    }
+
+    @Test
+    void shouldNotEscalateOutsideWindow() {
+        final ControllableTimeProvider time = new ControllableTimeProvider(0L, Instant.parse("2026-04-23T10:00:00Z"));
+        final RiskCoordinatorEngine engine = new RiskCoordinatorEngine(
+                new ExposureLedger(), "risk-node-1", time, 3, Duration.ofSeconds(60));
+
+        engine.apply(submitted("crypto", 10.0));
+        engine.apply(unknown("crypto"));
+        time.advanceBy(Duration.ofSeconds(70));
+        engine.apply(unknown("crypto"));
+        time.advanceBy(Duration.ofSeconds(70));
+        engine.apply(unknown("crypto"));
+
+        assertEquals(ExecutionState.SAFE, engine.currentStates().get("crypto"));
+    }
+
+    @Test
+    void shouldResetHaltToRun() {
+        final ControllableTimeProvider time = new ControllableTimeProvider(0L, Instant.parse("2026-04-23T10:00:00Z"));
+        final RiskCoordinatorEngine engine = new RiskCoordinatorEngine(
+                new ExposureLedger(), "risk-node-1", time, 3, Duration.ofSeconds(60));
+
+        engine.apply(submitted("crypto", 10.0));
+        engine.apply(unknown("crypto"));
+        time.advanceBy(Duration.ofSeconds(10));
+        engine.apply(unknown("crypto"));
+        time.advanceBy(Duration.ofSeconds(10));
+        engine.apply(unknown("crypto"));
+
+        final RiskStateResetCommand cmd = new RiskStateResetCommand(
+                CanonicalId.parse("S07:I03:VA07-03:BA01"),
+                ExecutionState.RUN, "op1", "manual reset after review",
+                Instant.parse("2026-04-23T10:00:00Z"));
+
+        engine.executeResetCommand(cmd);
+
+        assertEquals(ExecutionState.RUN, engine.currentStates().get("crypto"));
+    }
+
+    @Test
+    void shouldClearUnknownWindowOnReset() {
+        final ControllableTimeProvider time = new ControllableTimeProvider(0L, Instant.parse("2026-04-23T10:00:00Z"));
+        final RiskCoordinatorEngine engine = new RiskCoordinatorEngine(
+                new ExposureLedger(), "risk-node-1", time, 3, Duration.ofSeconds(60));
+
+        engine.apply(submitted("crypto", 10.0));
+        engine.apply(unknown("crypto"));
+        time.advanceBy(Duration.ofSeconds(10));
+        engine.apply(unknown("crypto"));
+
+        final RiskStateResetCommand cmd = new RiskStateResetCommand(
+                CanonicalId.parse("S07:I03:VA07-03:BA01"),
+                ExecutionState.RUN, "op1", "manual reset after review",
+                Instant.parse("2026-04-23T10:00:00Z"));
+        engine.executeResetCommand(cmd);
+
+        engine.apply(unknown("crypto"));
+        assertEquals(ExecutionState.SAFE, engine.currentStates().get("crypto"));
     }
 
     private static EventEnvelope submitted(final String accountId, final double size) {

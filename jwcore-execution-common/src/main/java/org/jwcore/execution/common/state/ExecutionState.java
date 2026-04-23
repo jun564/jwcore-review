@@ -23,7 +23,7 @@ public enum ExecutionState {
         return switch (this) {
             case RUN -> target == RUN || target == SAFE || target == HALT || target == KILL;
             case SAFE -> target == SAFE || target == RUN || target == HALT || target == KILL;
-            case HALT -> target == HALT || target == SAFE || target == KILL;
+            case HALT -> target == HALT || target == RUN || target == KILL;
             case KILL -> target == KILL;
         };
     }
