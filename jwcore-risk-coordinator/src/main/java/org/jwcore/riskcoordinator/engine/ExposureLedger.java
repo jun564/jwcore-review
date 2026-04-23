@@ -5,6 +5,8 @@ import org.jwcore.domain.EventEnvelope;
 import org.jwcore.domain.EventType;
 import org.jwcore.domain.OrderSide;
 import org.jwcore.domain.events.OrderCanceledEvent;
+import org.jwcore.domain.events.BrokerReconcileEvent;
+import org.jwcore.domain.events.DriftClassification;
 import org.jwcore.domain.events.OrderFilledEvent;
 import org.jwcore.domain.events.OrderRejectedEvent;
 
@@ -40,6 +42,13 @@ public final class ExposureLedger {
         if (envelope.eventType() == EventType.OrderCanceledEvent) {
             final OrderCanceledEvent event = OrderCanceledEvent.fromPayload(envelope.payload());
             decrementIntentOrFail(event.canonicalId(), "Cancel without pending intent for canonicalId=%s");
+            return;
+        }
+
+
+        if (envelope.eventType() == EventType.BrokerReconcileEvent) {
+            final BrokerReconcileEvent event = BrokerReconcileEvent.fromPayload(envelope.payload());
+            onBrokerReconcile(event);
             return;
         }
 
@@ -81,6 +90,14 @@ public final class ExposureLedger {
 
     public BigDecimal marginUsed() {
         return totalExposure().multiply(MARGIN_RATE);
+    }
+
+
+    private void onBrokerReconcile(final BrokerReconcileEvent event) {
+        if (event.classification() == DriftClassification.NONE) {
+            return;
+        }
+        // MVP 4B1: reconcile jest diagnostyczny; nie modyfikujemy pozycji finansowej ani intentCount.
     }
 
     private void applyFill(final OrderFilledEvent event) {
