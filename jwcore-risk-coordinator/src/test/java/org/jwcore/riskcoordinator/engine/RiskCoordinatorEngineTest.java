@@ -1,5 +1,9 @@
 package org.jwcore.riskcoordinator.engine;
 
+import org.jwcore.core.failure.ProcessingFailureEmitter;
+import org.jwcore.core.ports.IEventJournal;
+import org.jwcore.core.ports.TailSubscription;
+import org.jwcore.core.time.ControllableTimeProvider;
 import org.jwcore.domain.CanonicalId;
 import org.jwcore.domain.EventEnvelope;
 import org.jwcore.domain.EventType;
@@ -11,16 +15,18 @@ import org.jwcore.domain.events.OrderFilledEvent;
 import org.jwcore.domain.events.OrderSubmittedEvent;
 import org.jwcore.domain.events.OrderUnknownEvent;
 import org.jwcore.execution.common.state.ExecutionState;
-import org.jwcore.core.time.ControllableTimeProvider;
 import org.jwcore.riskcoordinator.command.RiskStateResetCommand;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Consumer;
 import java.util.logging.Handler;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
@@ -30,6 +36,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 class RiskCoordinatorEngineTest {
     @Test
@@ -223,6 +230,73 @@ class RiskCoordinatorEngineTest {
         } finally {
             logger.removeHandler(handler);
         }
+    }
+
+    @Test
+    void shouldEmitFailureForMalformedEventWhenEmitterConfigured() {
+        final ControllableTimeProvider time = new ControllableTimeProvider(7L, Instant.parse("2026-04-24T10:00:00Z"));
+        final RecordingJournal journal = new RecordingJournal();
+        final ProcessingFailureEmitter failureEmitter = new ProcessingFailureEmitter(journal, time, "risk-node-1");
+        final RiskCoordinatorEngine engine = new RiskCoordinatorEngine(
+                new ExposureLedger(), "risk-node-1", time, 3, Duration.ofSeconds(60), failureEmitter);
+        final EventEnvelope malformed = envelope(EventType.OrderSubmittedEvent, "invalid".getBytes());
+
+        final Set<String> affected = engine.apply(malformed);
+
+        assertEquals(Set.of(), affected);
+        assertEquals(1, journal.appended.size());
+        assertEquals(EventType.EventProcessingFailedEvent, journal.appended.get(0).eventType());
+        final String payloadText = new String(journal.appended.get(0).payload(), StandardCharsets.UTF_8);
+        assertTrue(payloadText.startsWith(malformed.eventId().toString() + "|"));
+    }
+
+    @Test
+    void shouldSwallowFailureEmitterExceptions() {
+        final ControllableTimeProvider time = new ControllableTimeProvider(7L, Instant.parse("2026-04-24T10:00:00Z"));
+        final ThrowingJournal journal = new ThrowingJournal();
+        final ProcessingFailureEmitter failureEmitter = new ProcessingFailureEmitter(journal, time, "risk-node-1");
+        final RiskCoordinatorEngine engine = new RiskCoordinatorEngine(
+                new ExposureLedger(), "risk-node-1", time, 3, Duration.ofSeconds(60), failureEmitter);
+        final EventEnvelope malformed = envelope(EventType.OrderSubmittedEvent, "invalid".getBytes());
+
+        try {
+            final Set<String> affected = engine.apply(malformed);
+            assertEquals(Set.of(), affected);
+        } catch (final Exception exception) {
+            fail("Exception must not propagate from apply()");
+        }
+    }
+
+    @Test
+    void shouldKeepSnapshotsUnchangedAfterMalformedEvent() {
+        final ControllableTimeProvider time = new ControllableTimeProvider(0L, Instant.parse("2026-04-24T10:00:00Z"));
+        final RecordingJournal journal = new RecordingJournal();
+        final ProcessingFailureEmitter failureEmitter = new ProcessingFailureEmitter(journal, time, "risk-node-1");
+        final RiskCoordinatorEngine engine = new RiskCoordinatorEngine(
+                new ExposureLedger(), "risk-node-1", time, 3, Duration.ofSeconds(60), failureEmitter);
+
+        engine.apply(submitted("crypto", 10.0));
+        engine.apply(intent("crypto", 10.0));
+        engine.apply(filled("crypto", OrderSide.BUY, "10", "100", "1"));
+
+        final Map<String, ExecutionState> stateBefore = engine.currentStates();
+        final Map<String, BigDecimal> exposureBefore = engine.exposureSnapshot();
+
+        final Set<String> affected = engine.apply(envelope(EventType.OrderSubmittedEvent, "invalid".getBytes()));
+
+        assertEquals(Set.of(), affected);
+        assertEquals(stateBefore, engine.currentStates());
+        assertEquals(exposureBefore, engine.exposureSnapshot());
+    }
+
+    @Test
+    void shouldKeepLegacyBehaviorWithoutFailureEmitter() {
+        final RiskCoordinatorEngine engine = new RiskCoordinatorEngine("risk-node-1");
+        final EventEnvelope malformed = envelope(EventType.OrderSubmittedEvent, "invalid".getBytes());
+
+        final Set<String> affected = engine.apply(malformed);
+
+        assertEquals(Set.of(), affected);
     }
 
     @Test
@@ -432,5 +506,62 @@ class RiskCoordinatorEngineTest {
 
         @Override public void flush() { }
         @Override public void close() { }
+    }
+
+    private static final class RecordingJournal implements IEventJournal {
+        private final List<EventEnvelope> appended = new ArrayList<>();
+
+        @Override
+        public long append(final EventEnvelope envelope) {
+            appended.add(envelope);
+            return appended.size();
+        }
+
+        @Override
+        public List<EventEnvelope> read(final Instant fromInclusive, final Instant toExclusive) {
+            return List.of();
+        }
+
+        @Override
+        public long currentSequence() {
+            return appended.size();
+        }
+
+        @Override
+        public List<EventEnvelope> readAfterSequence(final long sequence) {
+            return List.of();
+        }
+
+        @Override
+        public TailSubscription tail(final Consumer<EventEnvelope> consumer) {
+            return () -> { };
+        }
+    }
+
+    private static final class ThrowingJournal implements IEventJournal {
+        @Override
+        public long append(final EventEnvelope envelope) {
+            throw new RuntimeException("append failure");
+        }
+
+        @Override
+        public List<EventEnvelope> read(final Instant fromInclusive, final Instant toExclusive) {
+            return List.of();
+        }
+
+        @Override
+        public long currentSequence() {
+            return 0L;
+        }
+
+        @Override
+        public List<EventEnvelope> readAfterSequence(final long sequence) {
+            return List.of();
+        }
+
+        @Override
+        public TailSubscription tail(final Consumer<EventEnvelope> consumer) {
+            return () -> { };
+        }
     }
 }
