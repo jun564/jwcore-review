@@ -5,6 +5,9 @@ import org.jwcore.core.time.RealTimeProvider;
 import org.jwcore.domain.CanonicalId;
 import org.jwcore.domain.EventEnvelope;
 import org.jwcore.domain.EventType;
+import org.jwcore.domain.events.AlertEvent;
+import org.jwcore.domain.events.AlertSeverity;
+import org.jwcore.domain.events.AlertType;
 import org.jwcore.domain.events.OrderCanceledEvent;
 import org.jwcore.domain.events.OrderFilledEvent;
 import org.jwcore.domain.events.OrderIntentEvent;
@@ -47,6 +50,7 @@ public final class RiskCoordinatorEngine {
     private final AtomicReference<Map<String, CanonicalId>> canonicalByAccount = new AtomicReference<>(Map.of());
     private final AtomicReference<Map<String, java.math.BigDecimal>> exposureByAccount = new AtomicReference<>(Map.of());
     private final AtomicReference<Map<CanonicalId, Deque<Instant>>> unknownTimestamps = new AtomicReference<>(Map.of());
+    private final AlertEnvelopeFactory alertEnvelopeFactory;
 
     public RiskCoordinatorEngine(final String sourceProcessId) {
         this(new ExposureLedger(), sourceProcessId, new RealTimeProvider(), 3, Duration.ofSeconds(60));
@@ -75,6 +79,7 @@ public final class RiskCoordinatorEngine {
         }
         this.haltThresholdCount = haltThresholdCount;
         this.haltWindowDuration = haltWindowDuration;
+        this.alertEnvelopeFactory = new AlertEnvelopeFactory(sourceProcessId);
     }
 
     public Set<String> apply(final EventEnvelope envelope) {
@@ -145,18 +150,33 @@ public final class RiskCoordinatorEngine {
     }
 
     public Optional<RiskDecisionEvent> evaluateAndBuildIfChanged(final String accountId) {
+        return evaluateAndBuildResultIfChanged(accountId)
+                .decisionEnvelope()
+                .map(envelope -> {
+                    final String[] parts = new String(envelope.payload(), StandardCharsets.UTF_8).split("\\|", 3);
+                    return new RiskDecisionEvent(parts[0], ExecutionState.valueOf(parts[1]), parts[2], envelope);
+                });
+    }
+
+    public RiskEvaluationResult evaluateAndBuildResultIfChanged(final String accountId) {
         validateAccountId(accountId);
         final ExecutionState desiredState = accountStates.get().getOrDefault(accountId, ExecutionState.RUN);
         final ExecutionState previous = lastEmittedStates.get().get(accountId);
         if (desiredState == previous) {
-            return Optional.empty();
+            return RiskEvaluationResult.empty();
         }
 
         final Map<String, ExecutionState> updated = new HashMap<>(lastEmittedStates.get());
         updated.put(accountId, desiredState);
         lastEmittedStates.set(updated);
 
-        return Optional.of(buildRiskDecision(accountId, desiredState, reasonFor(accountId, desiredState)));
+        final String reason = reasonFor(accountId, desiredState);
+        final RiskDecisionEvent decision = buildRiskDecision(accountId, desiredState, reason);
+        final AlertEvent alert = buildAlertEvent(accountId, previous, desiredState, reason);
+
+        final EventEnvelope alertEnvelope = alertEnvelopeFactory.buildEnvelope(alert);
+        final EventEnvelope decisionEnvelope = decision.envelope();
+        return new RiskEvaluationResult(Optional.of(decisionEnvelope), Optional.of(alertEnvelope));
     }
 
     public List<RiskDecisionEvent> initialPublishFromCurrentState(final List<String> monitoredAccounts) {
@@ -246,6 +266,32 @@ public final class RiskCoordinatorEngine {
                 null
         );
         return new RiskDecisionEvent(accountId, desiredState, reason, envelope);
+    }
+
+
+    private AlertEvent buildAlertEvent(final String accountId,
+                                       final ExecutionState from,
+                                       final ExecutionState to,
+                                       final String reason) {
+        return new AlertEvent(
+                UUID.randomUUID(),
+                accountId,
+                mapToSeverity(to),
+                from == null ? null : org.jwcore.domain.ExecutionState.valueOf(from.name()),
+                org.jwcore.domain.ExecutionState.valueOf(to.name()),
+                AlertType.STATE_TRANSITION,
+                reason,
+                List.of(),
+                timeProvider.eventTime()
+        );
+    }
+
+    private static AlertSeverity mapToSeverity(final ExecutionState state) {
+        return switch (state) {
+            case RUN -> AlertSeverity.INFO;
+            case SAFE -> AlertSeverity.WARNING;
+            case HALT, KILL -> AlertSeverity.CRITICAL;
+        };
     }
 
     private String reasonFor(final String accountId, final ExecutionState desiredState) {

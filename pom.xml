@@ -16,6 +16,7 @@
         <module>jwcore-core</module>
         <module>jwcore-adapter-jforex</module>
         <module>jwcore-adapter-cq</module>
+        <module>jwcore-adapter-alerting</module>
         <module>jwcore-execution-common</module>
         <module>jwcore-execution-crypto</module>
         <module>jwcore-execution-forex</module>
