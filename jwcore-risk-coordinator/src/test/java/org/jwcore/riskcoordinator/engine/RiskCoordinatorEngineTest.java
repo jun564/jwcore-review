@@ -19,6 +19,7 @@ import org.jwcore.riskcoordinator.command.RiskStateResetCommand;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
