@@ -15,5 +15,6 @@ public enum EventType {
     OrderCanceledEvent,
     OrderUnknownEvent,
     EventProcessingFailedEvent,
-    BrokerReconcileEvent
+    BrokerReconcileEvent,
+    AlertEvent
 }

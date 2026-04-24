@@ -27,6 +27,7 @@ import java.util.logging.LogRecord;
 import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -109,6 +110,54 @@ class RiskCoordinatorEngineTest {
         engine.apply(unknown("crypto"));
         assertTrue(engine.evaluateAndBuildIfChanged("crypto").isPresent());
         assertFalse(engine.evaluateAndBuildIfChanged("crypto").isPresent());
+    }
+
+
+    @Test
+    void shouldBuildDecisionAndAlertEnvelopesForStateChange() {
+        final RiskCoordinatorEngine engine = new RiskCoordinatorEngine("risk-node-1");
+
+        engine.evaluateAndBuildResultIfChanged("crypto");
+        engine.apply(unknown("crypto"));
+
+        final RiskEvaluationResult result = engine.evaluateAndBuildResultIfChanged("crypto");
+
+        assertFalse(result.isEmpty());
+        assertTrue(result.decisionEnvelope().isPresent());
+        assertTrue(result.alertEnvelope().isPresent());
+        assertEquals(EventType.AlertEvent, result.alertEnvelope().orElseThrow().eventType());
+    }
+
+    @Test
+    void shouldReturnEmptyResultWhenStateDoesNotChange() {
+        final RiskCoordinatorEngine engine = new RiskCoordinatorEngine("risk-node-1");
+
+        engine.evaluateAndBuildResultIfChanged("crypto");
+        final RiskEvaluationResult result = engine.evaluateAndBuildResultIfChanged("crypto");
+
+        assertTrue(result.isEmpty());
+    }
+
+    @Test
+    void shouldNotDuplicateEmissionInEvaluateAndBuildResultIfChanged() {
+        final RiskCoordinatorEngine engine = new RiskCoordinatorEngine("risk-node-1");
+
+        final RiskEvaluationResult first = engine.evaluateAndBuildResultIfChanged("crypto");
+        final RiskEvaluationResult second = engine.evaluateAndBuildResultIfChanged("crypto");
+
+        assertFalse(first.isEmpty());
+        assertTrue(second.isEmpty());
+    }
+
+    @Test
+    void shouldContainAlertIdInAlertIdempotencyKey() {
+        final RiskCoordinatorEngine engine = new RiskCoordinatorEngine("risk-node-1");
+
+        final RiskEvaluationResult result = engine.evaluateAndBuildResultIfChanged("crypto");
+
+        final EventEnvelope alertEnvelope = result.alertEnvelope().orElseThrow();
+        assertNotNull(alertEnvelope.idempotencyKey());
+        assertTrue(alertEnvelope.idempotencyKey().contains(alertEnvelope.eventId().toString()));
     }
 
     @Test
