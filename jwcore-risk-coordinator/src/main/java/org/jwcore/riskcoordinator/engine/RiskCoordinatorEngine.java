@@ -2,6 +2,7 @@ package org.jwcore.riskcoordinator.engine;
 
 import org.jwcore.core.time.ITimeProvider;
 import org.jwcore.core.time.RealTimeProvider;
+import org.jwcore.core.failure.ProcessingFailureEmitter;
 import org.jwcore.domain.CanonicalId;
 import org.jwcore.domain.EventEnvelope;
 import org.jwcore.domain.EventType;
@@ -33,6 +34,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
 public final class RiskCoordinatorEngine {
@@ -51,6 +53,7 @@ public final class RiskCoordinatorEngine {
     private final AtomicReference<Map<String, java.math.BigDecimal>> exposureByAccount = new AtomicReference<>(Map.of());
     private final AtomicReference<Map<CanonicalId, Deque<Instant>>> unknownTimestamps = new AtomicReference<>(Map.of());
     private final AlertEnvelopeFactory alertEnvelopeFactory;
+    private final ProcessingFailureEmitter failureEmitter;
 
     public RiskCoordinatorEngine(final String sourceProcessId) {
         this(new ExposureLedger(), sourceProcessId, new RealTimeProvider(), 3, Duration.ofSeconds(60));
@@ -65,6 +68,26 @@ public final class RiskCoordinatorEngine {
                                  final ITimeProvider timeProvider,
                                  final int haltThresholdCount,
                                  final Duration haltWindowDuration) {
+        this(exposureLedger, sourceProcessId, timeProvider, haltThresholdCount, haltWindowDuration, null, false);
+    }
+
+    public RiskCoordinatorEngine(final ExposureLedger exposureLedger,
+                                 final String sourceProcessId,
+                                 final ITimeProvider timeProvider,
+                                 final int haltThresholdCount,
+                                 final Duration haltWindowDuration,
+                                 final ProcessingFailureEmitter failureEmitter) {
+        this(exposureLedger, sourceProcessId, timeProvider, haltThresholdCount, haltWindowDuration,
+                Objects.requireNonNull(failureEmitter, "failureEmitter cannot be null"), true);
+    }
+
+    private RiskCoordinatorEngine(final ExposureLedger exposureLedger,
+                                  final String sourceProcessId,
+                                  final ITimeProvider timeProvider,
+                                  final int haltThresholdCount,
+                                  final Duration haltWindowDuration,
+                                  final ProcessingFailureEmitter failureEmitter,
+                                  final boolean emitterRequired) {
         this.exposureLedger = Objects.requireNonNull(exposureLedger, "exposureLedger cannot be null");
         this.sourceProcessId = Objects.requireNonNull(sourceProcessId, "sourceProcessId cannot be null");
         this.timeProvider = Objects.requireNonNull(timeProvider, "timeProvider cannot be null");
@@ -80,10 +103,17 @@ public final class RiskCoordinatorEngine {
         this.haltThresholdCount = haltThresholdCount;
         this.haltWindowDuration = haltWindowDuration;
         this.alertEnvelopeFactory = new AlertEnvelopeFactory(sourceProcessId);
+        this.failureEmitter = emitterRequired
+                ? Objects.requireNonNull(failureEmitter, "failureEmitter cannot be null")
+                : failureEmitter;
     }
 
     public Set<String> apply(final EventEnvelope envelope) {
         Objects.requireNonNull(envelope, "envelope cannot be null");
+        // ADR-017 Faza 1: copy-before-commit for RiskCoordinatorEngine-owned maps.
+        // Mutations of accountStates, canonicalByAccount, exposureByAccount and
+        // unknownTimestamps must be committed via AtomicReference.set() only after
+        // local computation succeeds. ExposureLedger transactional hardening is out of scope.
         try {
             if (envelope.eventType() == EventType.OrderSubmittedEvent) {
                 final OrderSubmittedEvent event = OrderSubmittedEvent.fromPayload(envelope.payload());
@@ -142,9 +172,18 @@ public final class RiskCoordinatorEngine {
                 return Set.of(event.accountId());
             }
             return Set.of();
-        } catch (final RuntimeException exception) {
-            LOGGER.warning(() -> "Skipping malformed event in risk engine, eventType=" + envelope.eventType()
-                    + ", eventId=" + envelope.eventId() + ", reason=" + exception.getMessage());
+        } catch (final Exception exception) {
+            LOGGER.log(Level.SEVERE,
+                    "Nieudane przetworzenie eventu w RiskCoordinatorEngine eventId="
+                            + envelope.eventId() + ", eventType=" + envelope.eventType(),
+                    exception);
+            if (failureEmitter != null) {
+                try {
+                    failureEmitter.emit(envelope.eventId(), exception);
+                } catch (final Exception emitException) {
+                    LOGGER.log(Level.SEVERE, "Failed to emit EventProcessingFailedEvent", emitException);
+                }
+            }
             return Set.of();
         }
     }
