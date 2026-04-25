@@ -83,7 +83,7 @@ Lista zasad jest ponumerowana i zachowuje ciągłość między wersjami.
 
 **31.** **NOWA (22.04.2026) — Wyjątek build-fix dla Claude Code.** Dla trywialnych błędów kompilacji/syntax (final, dostosowanie wywołań do nowego API, importy, usunięcie martwego kodu) — Claude Code MOŻE sam poprawić pod kontrolą Claude QG, bez chodzenia do Codex. Zabronione dla Code: zmiana logiki biznesowej, nowa logika księgowania/ryzyka/egzekucji, nowe testy, nowe API. Claude QG opisuje dokładny zakres fixu w prompcie, Code raportuje każdą zmianę w raporcie. Powód: pragmatyka — Codex traci po 2 iteracje na build-fix który Code załatwia w minutę.
 
-## Zasady procesu sesji (32–36)
+## Zasady procesu sesji (32–37)
 
 **32.** Weryfikacja stanu repo na starcie sesji. Claude na starcie każdej sesji prosi Code o `git log --oneline -20` z datami ZANIM zaufa swojej pamięci trwałej. Paczki mogą być wypchnięte między sesjami.
 
@@ -95,9 +95,14 @@ Lista zasad jest ponumerowana i zachowuje ciągłość między wersjami.
 
 **36.** Rozbicie paczek. Jesli paczka rozbija sie o fakty z kodu (blokery w istniejacych strukturach danych, brakujace API, breaking changes wymagane w wielu miejscach), zespol AI ma obowiazek zaproponowac rozbicie na mniejsze paczki zamiast forsowac pelny zakres w jednej iteracji. Minimum Viable najpierw, pelna implementacja w osobnej paczce. Decyzja nalezy do Architekta. Precedens: Paczka 4C2/B (24.04.2026) zostala rozbita na Faze 1 (minimum viable error isolation) i Faze 2 (4C2/C - pelne rozszerzenie EventProcessingFailedEvent) po odkryciu blokera: idempotency key deterministyczny po payload uniemozliwial retry counter z journala bez rozszerzenia eventu do wersji v3.
 
+**37.** System autonomiczny. JWCore jest systemem AUTOMATYCZNYM. Architekt nie jest dyspozytorem 24/7 - ma prace zawodowa, sen, podroze i inne sprawy. System MUSI dzialac bezpiecznie bez aktywnej obecnosci Architekta. Telegram alert to powiadomienie, NIE wezwanie do akcji. Kazda decyzja architektoniczna gdzie "operator/Architekt zareaguje w czasie X" jest ZLA. Domyslna odpowiedz systemu na nieznany lub niepewny stan to SAFE (blokada nowych pozycji, dotychczasowe zyja zgodnie z wlasnymi SL/TP). Reset z SAFE/HALT do RUN jest manualny, ale system czeka spokojnie - nie ma SLA reakcji Architekta. Konsekwencja: kazda paczka funkcjonalna musi byc projektowana pod ta zasade. Permanent failure, niezgodnosci stanow, brakujace dane - wszystko co generuje niepewnosc systemu - eskaluje do SAFE bez wymogu interwencji w okreslonym czasie.
+
 ---
 
 ## Changelog
+
+**v1.4 (25.04.2026)**
+- Dodanie zasady 37 (System autonomiczny) jako fundamentalnej filozofii projektu. Konsekwencja dla 4C2/C: permanent failure ZAWSZE eskaluje do SAFE, bez wymogu szybkiej reakcji Architekta.
 
 **v1.3 (25.04.2026)**
 - Dodanie zasady 36 (Rozbicie paczek) na bazie precedensu 4C2/B z 24.04.2026

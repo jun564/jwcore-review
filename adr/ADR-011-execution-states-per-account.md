@@ -127,3 +127,9 @@ Procesy Execution **nie komunikują się bezpośrednio**. Komunikacja przez Chro
 - ADR-008 (sole state rebuilder — Risk Coordinator nie rebuilduje)
 - Doc2 decyzja 3.2 (dwa rachunki brokerskie)
 - Sprint 3 — implementacja
+
+---
+
+## Aktualizacja 25.04.2026 — Zasada autonomii systemu
+
+W kontekscie zasady 37 (ZASADY_WSPOLPRACY.md): "decyzja operatora" wzmiankowana w niniejszym ADR jest OPCJA ALTERNATYWNA, nie wymagana. Domyslny tor decyzyjny to programowy Risk Coordinator, ktory automatycznie eskaluje stan kont na podstawie cross-account analysis. Operator (Architekt) moze wykonac reset, ale system nie zaklada szybkiej reakcji - dzialanie w stanie HALT/SAFE jest stanem stabilnym i bezpiecznym, system moze w nim pozostac dowolnie dlugo.
