@@ -4,10 +4,8 @@ import org.jwcore.core.ports.IEventJournal;
 import org.jwcore.core.time.ITimeProvider;
 import org.jwcore.domain.EventEnvelope;
 import org.jwcore.domain.EventType;
-import org.jwcore.domain.IdempotencyKeys;
 import org.jwcore.domain.events.EventProcessingFailedEvent;
 
-import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
@@ -15,7 +13,7 @@ import java.util.UUID;
 public final class ProcessingFailureEmitter {
 
     private static final int ERROR_MESSAGE_MAX_LENGTH = 512;
-    private static final byte PAYLOAD_VERSION = 2;
+    private static final byte PAYLOAD_VERSION = 3;
 
     private final IEventJournal journal;
     private final ITimeProvider timeProvider;
@@ -33,19 +31,38 @@ public final class ProcessingFailureEmitter {
     }
 
     public EventProcessingFailedEvent emit(final UUID failedEventId, final Throwable exception) {
+        return emit(failedEventId, exception, 1, "unknown", null, null);
+    }
+
+    public EventProcessingFailedEvent emit(final UUID failedEventId,
+                                           final Throwable exception,
+                                           final int attemptNumber,
+                                           final String sourceModule,
+                                           final String originalEventType,
+                                           final String failedAccountId) {
         Objects.requireNonNull(failedEventId, "failedEventId cannot be null");
         Objects.requireNonNull(exception, "exception cannot be null");
 
         final Instant now = timeProvider.eventTime();
         final String errorType = exception.getClass().getName();
         final String errorMessage = sanitizeAndTruncate(Objects.toString(exception.getMessage(), ""));
+        final boolean isPermanent = attemptNumber >= 3;
 
-        final byte[] payload = String.join("|",
-                        failedEventId.toString(),
-                        errorType,
-                        errorMessage,
-                        now.toString())
-                .getBytes(StandardCharsets.UTF_8);
+        final EventProcessingFailedEvent event = new EventProcessingFailedEvent(
+                failedEventId,
+                errorType,
+                errorMessage,
+                now,
+                attemptNumber,
+                isPermanent,
+                sourceModule,
+                originalEventType,
+                failedAccountId,
+                placeholderEnvelope()
+        );
+
+        final byte[] payload = event.toPayload();
+        final String customIdempotencyKey = "failed:" + failedEventId + ":" + attemptNumber;
 
         final EventEnvelope failureEnvelope = new EventEnvelope(
                 UUID.randomUUID(),
@@ -53,7 +70,7 @@ public final class ProcessingFailureEmitter {
                 null,
                 failedEventId.toString(),
                 null,
-                IdempotencyKeys.generate(null, EventType.EventProcessingFailedEvent, payload),
+                customIdempotencyKey,
                 timeProvider.monotonicTime(),
                 now,
                 PAYLOAD_VERSION,
@@ -63,14 +80,7 @@ public final class ProcessingFailureEmitter {
         );
 
         journal.append(failureEnvelope);
-
-        return new EventProcessingFailedEvent(
-                failedEventId,
-                errorType,
-                errorMessage,
-                now,
-                failureEnvelope
-        );
+        return event.withEnvelope(failureEnvelope);
     }
 
     private static String sanitizeAndTruncate(final String rawMessage) {
@@ -79,5 +89,22 @@ public final class ProcessingFailureEmitter {
             return sanitized;
         }
         return sanitized.substring(0, ERROR_MESSAGE_MAX_LENGTH);
+    }
+
+    private static EventEnvelope placeholderEnvelope() {
+        return new EventEnvelope(
+                UUID.randomUUID(),
+                EventType.EventProcessingFailedEvent,
+                null,
+                null,
+                null,
+                "placeholder",
+                0L,
+                Instant.EPOCH,
+                (byte) 0,
+                new byte[0],
+                "unknown",
+                null
+        );
     }
 }

@@ -3,6 +3,8 @@ package org.jwcore.riskcoordinator.engine;
 import org.jwcore.core.time.ITimeProvider;
 import org.jwcore.core.time.RealTimeProvider;
 import org.jwcore.core.failure.ProcessingFailureEmitter;
+import org.jwcore.core.util.FailureCounter;
+import org.jwcore.core.ports.IEventJournal;
 import org.jwcore.domain.CanonicalId;
 import org.jwcore.domain.EventEnvelope;
 import org.jwcore.domain.EventType;
@@ -24,6 +26,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.stream.Collectors;
 import java.util.Collections;
 import java.util.Deque;
 import java.util.HashMap;
@@ -54,6 +57,8 @@ public final class RiskCoordinatorEngine {
     private final AtomicReference<Map<CanonicalId, Deque<Instant>>> unknownTimestamps = new AtomicReference<>(Map.of());
     private final AlertEnvelopeFactory alertEnvelopeFactory;
     private final ProcessingFailureEmitter failureEmitter;
+    private final FailureCounter failureCounter;
+    private final IEventJournal alertJournal;
 
     public RiskCoordinatorEngine(final String sourceProcessId) {
         this(new ExposureLedger(), sourceProcessId, new RealTimeProvider(), 3, Duration.ofSeconds(60));
@@ -68,7 +73,7 @@ public final class RiskCoordinatorEngine {
                                  final ITimeProvider timeProvider,
                                  final int haltThresholdCount,
                                  final Duration haltWindowDuration) {
-        this(exposureLedger, sourceProcessId, timeProvider, haltThresholdCount, haltWindowDuration, null, false);
+        this(exposureLedger, sourceProcessId, timeProvider, haltThresholdCount, haltWindowDuration, null, null, null, false);
     }
 
     public RiskCoordinatorEngine(final ExposureLedger exposureLedger,
@@ -78,7 +83,23 @@ public final class RiskCoordinatorEngine {
                                  final Duration haltWindowDuration,
                                  final ProcessingFailureEmitter failureEmitter) {
         this(exposureLedger, sourceProcessId, timeProvider, haltThresholdCount, haltWindowDuration,
-                Objects.requireNonNull(failureEmitter, "failureEmitter cannot be null"), true);
+                Objects.requireNonNull(failureEmitter, "failureEmitter cannot be null"), null, null, true);
+    }
+
+
+    public RiskCoordinatorEngine(final ExposureLedger exposureLedger,
+                                 final String sourceProcessId,
+                                 final ITimeProvider timeProvider,
+                                 final int haltThresholdCount,
+                                 final Duration haltWindowDuration,
+                                 final ProcessingFailureEmitter failureEmitter,
+                                 final FailureCounter failureCounter,
+                                 final IEventJournal alertJournal) {
+        this(exposureLedger, sourceProcessId, timeProvider, haltThresholdCount, haltWindowDuration,
+                Objects.requireNonNull(failureEmitter, "failureEmitter cannot be null"),
+                Objects.requireNonNull(failureCounter, "failureCounter cannot be null"),
+                Objects.requireNonNull(alertJournal, "alertJournal cannot be null"),
+                true);
     }
 
     private RiskCoordinatorEngine(final ExposureLedger exposureLedger,
@@ -87,6 +108,8 @@ public final class RiskCoordinatorEngine {
                                   final int haltThresholdCount,
                                   final Duration haltWindowDuration,
                                   final ProcessingFailureEmitter failureEmitter,
+                                  final FailureCounter failureCounter,
+                                  final IEventJournal alertJournal,
                                   final boolean emitterRequired) {
         this.exposureLedger = Objects.requireNonNull(exposureLedger, "exposureLedger cannot be null");
         this.sourceProcessId = Objects.requireNonNull(sourceProcessId, "sourceProcessId cannot be null");
@@ -106,6 +129,8 @@ public final class RiskCoordinatorEngine {
         this.failureEmitter = emitterRequired
                 ? Objects.requireNonNull(failureEmitter, "failureEmitter cannot be null")
                 : failureEmitter;
+        this.failureCounter = failureCounter;
+        this.alertJournal = alertJournal;
     }
 
     public Set<String> apply(final EventEnvelope envelope) {
@@ -179,9 +204,22 @@ public final class RiskCoordinatorEngine {
                     exception);
             if (failureEmitter != null) {
                 try {
-                    failureEmitter.emit(envelope.eventId(), exception);
+                    final int attemptNumber = failureCounter == null ? 1 : failureCounter.nextAttemptNumber(envelope.eventId());
+                    final String failedAccountId = tryExtractAccountId(envelope);
+                    final String originalEventType = envelope.eventType() == null ? null : envelope.eventType().name();
+                    final EventProcessingFailedEvent failure = failureEmitter.emit(
+                            envelope.eventId(),
+                            exception,
+                            attemptNumber,
+                            "risk-coordinator",
+                            originalEventType,
+                            failedAccountId
+                    );
+                    if (failure.isPermanent()) {
+                        escalateToSafe(failedAccountId, failure);
+                    }
                 } catch (final Exception emitException) {
-                    LOGGER.log(Level.SEVERE, "Failed to emit EventProcessingFailedEvent", emitException);
+                    LOGGER.log(Level.SEVERE, "Failed to emit/escalate EventProcessingFailedEvent", emitException);
                 }
             }
             return Set.of();
@@ -379,6 +417,62 @@ public final class RiskCoordinatorEngine {
         clearUnknownWindow(command.canonicalId());
         LOGGER.info(() -> "Manual risk reset to RUN for accountId=" + accountId
                 + ", operatorId=" + command.operatorId() + ", reason=" + command.reason());
+    }
+
+
+    private void escalateToSafe(final String failedAccountId, final EventProcessingFailedEvent failure) {
+        final Map<String, ExecutionState> nextStates = new HashMap<>(accountStates.get());
+        final List<String> affectedAccounts = new ArrayList<>();
+
+        if (failedAccountId != null) {
+            nextStates.put(failedAccountId, ExecutionState.SAFE);
+            affectedAccounts.add(failedAccountId);
+        } else {
+            for (final String accountId : nextStates.keySet()) {
+                nextStates.put(accountId, ExecutionState.SAFE);
+                affectedAccounts.add(accountId);
+            }
+        }
+
+        accountStates.set(Collections.unmodifiableMap(nextStates));
+
+        if (alertJournal != null) {
+            final AlertEvent alert = buildPermanentFailureAlert(failedAccountId, affectedAccounts, failure);
+            alertJournal.append(alertEnvelopeFactory.buildEnvelope(alert));
+        }
+    }
+
+    private AlertEvent buildPermanentFailureAlert(final String failedAccountId,
+                                                  final List<String> affectedAccounts,
+                                                  final EventProcessingFailedEvent failure) {
+        final String accountId = failedAccountId == null ? "unknown" : failedAccountId;
+        final List<String> compactAffected = affectedAccounts.stream().distinct().limit(20).collect(Collectors.toList());
+        return new AlertEvent(
+                UUID.randomUUID(),
+                accountId,
+                AlertSeverity.CRITICAL,
+                org.jwcore.domain.ExecutionState.SAFE,
+                org.jwcore.domain.ExecutionState.SAFE,
+                AlertType.PERMANENT_FAILURE,
+                failure.errorType(),
+                List.of(),
+                timeProvider.eventTime(),
+                compactAffected
+        );
+    }
+
+    private String tryExtractAccountId(final EventEnvelope envelope) {
+        try {
+            return switch (envelope.eventType()) {
+                case OrderSubmittedEvent -> OrderSubmittedEvent.fromPayload(envelope.payload()).accountId();
+                case OrderIntentEvent -> OrderIntentEvent.fromPayload(envelope.payload()).accountId();
+                case OrderUnknownEvent -> OrderUnknownEvent.fromPayload(envelope.payload()).accountId();
+                case OrderRejectedEvent -> OrderRejectedEvent.fromPayload(envelope.payload()).accountId();
+                default -> null;
+            };
+        } catch (final Exception ignored) {
+            return null;
+        }
     }
 
     private static void validateAccountId(final String accountId) {

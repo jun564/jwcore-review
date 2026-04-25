@@ -23,7 +23,11 @@ public record AlertEvent(
         AlertType alertType,
         String reason,
         List<String> brokerOrderIds,
-        Instant occurredAt) {
+        Instant occurredAt,
+        List<String> affectedAccounts) {
+
+    private static final int PAYLOAD_VERSION = 2;
+    private static final int MAX_AFFECTED_ACCOUNTS = 20;
 
     public AlertEvent {
         Objects.requireNonNull(alertId, "alertId cannot be null");
@@ -33,6 +37,7 @@ public record AlertEvent(
         Objects.requireNonNull(reason, "reason cannot be null");
         Objects.requireNonNull(brokerOrderIds, "brokerOrderIds cannot be null");
         Objects.requireNonNull(occurredAt, "occurredAt cannot be null");
+        Objects.requireNonNull(affectedAccounts, "affectedAccounts cannot be null");
         if (accountId.isBlank()) {
             throw new IllegalArgumentException("accountId cannot be blank");
         }
@@ -42,17 +47,35 @@ public record AlertEvent(
         if (brokerOrderIds.size() > 3) {
             throw new IllegalArgumentException("brokerOrderIds cannot exceed 3 elements");
         }
+        if (affectedAccounts.size() > MAX_AFFECTED_ACCOUNTS) {
+            throw new IllegalArgumentException("affectedAccounts cannot exceed 20 elements");
+        }
         if (alertType == AlertType.STATE_TRANSITION && transitionTo == null) {
             throw new IllegalArgumentException("transitionTo cannot be null for STATE_TRANSITION");
         }
         brokerOrderIds = List.copyOf(brokerOrderIds);
+        affectedAccounts = List.copyOf(affectedAccounts);
+    }
+
+    public AlertEvent(final UUID alertId,
+                      final String accountId,
+                      final AlertSeverity severity,
+                      final ExecutionState transitionFrom,
+                      final ExecutionState transitionTo,
+                      final AlertType alertType,
+                      final String reason,
+                      final List<String> brokerOrderIds,
+                      final Instant occurredAt) {
+        this(alertId, accountId, severity, transitionFrom, transitionTo, alertType, reason, brokerOrderIds, occurredAt, List.of());
     }
 
     public byte[] toPayload() {
         try {
             final ByteArrayOutputStream baos = new ByteArrayOutputStream();
             try (DataOutputStream out = new DataOutputStream(baos)) {
-                out.writeUTF(alertId.toString());
+                out.writeByte(PAYLOAD_VERSION);
+                out.writeLong(alertId.getMostSignificantBits());
+                out.writeLong(alertId.getLeastSignificantBits());
                 out.writeUTF(accountId);
                 out.writeUTF(severity.name());
 
@@ -68,10 +91,14 @@ public record AlertEvent(
                 out.writeUTF(alertType.name());
                 out.writeUTF(reason);
                 out.writeInt(brokerOrderIds.size());
-                for (String brokerOrderId : brokerOrderIds) {
+                for (final String brokerOrderId : brokerOrderIds) {
                     out.writeUTF(brokerOrderId);
                 }
-                out.writeUTF(occurredAt.toString());
+                out.writeLong(occurredAt.toEpochMilli());
+                out.writeInt(affectedAccounts.size());
+                for (final String affectedAccount : affectedAccounts) {
+                    out.writeUTF(affectedAccount);
+                }
             }
             return baos.toByteArray();
         } catch (final IOException exception) {
@@ -81,6 +108,48 @@ public record AlertEvent(
 
     public static AlertEvent fromPayload(final byte[] payload) throws IOException {
         Objects.requireNonNull(payload, "payload cannot be null");
+        if (payload.length > 0 && Byte.toUnsignedInt(payload[0]) == PAYLOAD_VERSION) {
+            return fromPayloadV2(payload);
+        }
+        return fromPayloadV1(payload);
+    }
+
+    private static AlertEvent fromPayloadV2(final byte[] payload) throws IOException {
+        try (DataInputStream in = new DataInputStream(new ByteArrayInputStream(payload))) {
+            final int version = Byte.toUnsignedInt(in.readByte());
+            if (version != PAYLOAD_VERSION) {
+                throw new IOException("Unsupported AlertEvent payload version: " + version);
+            }
+            final UUID alertId = new UUID(in.readLong(), in.readLong());
+            final String accountId = in.readUTF();
+            final AlertSeverity severity = AlertSeverity.valueOf(in.readUTF());
+
+            final boolean hasTransitionFrom = in.readBoolean();
+            final ExecutionState transitionFrom = hasTransitionFrom ? ExecutionState.valueOf(in.readUTF()) : null;
+
+            final boolean hasTransitionTo = in.readBoolean();
+            final ExecutionState transitionTo = hasTransitionTo ? ExecutionState.valueOf(in.readUTF()) : null;
+
+            final AlertType alertType = AlertType.valueOf(in.readUTF());
+            final String reason = in.readUTF();
+            final int brokerOrderIdCount = in.readInt();
+            final List<String> brokerOrderIds = new ArrayList<>(brokerOrderIdCount);
+            for (int i = 0; i < brokerOrderIdCount; i++) {
+                brokerOrderIds.add(in.readUTF());
+            }
+
+            final Instant occurredAt = Instant.ofEpochMilli(in.readLong());
+            final int affectedCount = in.readInt();
+            final List<String> affectedAccounts = new ArrayList<>(affectedCount);
+            for (int i = 0; i < affectedCount; i++) {
+                affectedAccounts.add(in.readUTF());
+            }
+            return new AlertEvent(alertId, accountId, severity, transitionFrom, transitionTo, alertType, reason,
+                    brokerOrderIds, occurredAt, affectedAccounts);
+        }
+    }
+
+    private static AlertEvent fromPayloadV1(final byte[] payload) throws IOException {
         try (DataInputStream in = new DataInputStream(new ByteArrayInputStream(payload))) {
             final UUID alertId = UUID.fromString(in.readUTF());
             final String accountId = in.readUTF();
@@ -100,7 +169,8 @@ public record AlertEvent(
                 brokerOrderIds.add(in.readUTF());
             }
             final Instant occurredAt = Instant.parse(in.readUTF());
-            return new AlertEvent(alertId, accountId, severity, transitionFrom, transitionTo, alertType, reason, brokerOrderIds, occurredAt);
+            return new AlertEvent(alertId, accountId, severity, transitionFrom, transitionTo, alertType, reason,
+                    brokerOrderIds, occurredAt, List.of());
         }
     }
 }

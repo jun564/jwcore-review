@@ -79,3 +79,36 @@ Wprowadza się następujące zasady obowiązkowe dla wszystkich konsumentów zda
 * **ADR-005:** Idempotencja – mechanizm błędu musi chronić spójność stanu.
 * **ADR-015:** Correlation ID – błędy powiązane z `failedEventId`.
 * **ADR-016:** Risk Decision – zachowanie spójności decyzji po izolacji błędu.
+
+---
+
+## Aktualizacja 25.04.2026 — Faza 2 (Paczka 4C2/C)
+
+Faza 2 implementuje auto-eskalacja zgodna z zasada 37 (System autonomiczny).
+
+### Nowe inwarianty:
+
+**Invariant 7 (Retry Counter):** ProcessingFailureEmitter liczy prob na
+podstawie journala (FailureCounter z LRU cache + journal jako source of
+truth). Idempotency key = "failed:{failedEventId}:{attemptNumber}".
+
+**Invariant 8 (Permanent Threshold):** attemptNumber >= 3 oznacza
+isPermanent=true.
+
+**Invariant 9 (Auto-eskalacja):** RiskCoordinatorEngine po wykryciu
+isPermanent=true:
+- Znany failedAccountId -> SAFE tego konta
+- Nieznany failedAccountId -> SAFE wszystkich kont modulu (zasada 37:
+  nieznany kontekst = niepewny stan = SAFE wszystkich)
+- Emisja AlertEvent typu PERMANENT_FAILURE z affectedAccounts
+- Reset zawsze manualny
+
+### Zmiany w schematach:
+
+- EventProcessingFailedEvent: bump v2 -> v3 (binary, 5 nowych pol)
+- AlertEvent: bump v1 -> v2 (binary, pole affectedAccounts)
+- Oba ze backward compat dla starych zdarzen w journalu
+
+### Tekst HALT zaktualizowany pod zasade 37:
+- Bylo: "Wymaga recznego resetu"
+- Po: "Reset wykonywany manualnie po analizie"
