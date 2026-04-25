@@ -8,7 +8,6 @@ import org.jwcore.domain.EventType;
 import org.jwcore.domain.events.EventProcessingFailedEvent;
 import org.junit.jupiter.api.Test;
 
-import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -17,30 +16,34 @@ import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ProcessingFailureEmitterTest {
 
     @Test
-    void shouldCreateFailureEnvelopeAndAppendToJournalWithV2Payload() {
+    void shouldCreateFailureEnvelopeAndAppendToJournalWithV3Payload() {
         final RecordingJournal journal = new RecordingJournal();
         final ControllableTimeProvider timeProvider = new ControllableTimeProvider(42L, Instant.parse("2026-04-24T10:00:00Z"));
         final ProcessingFailureEmitter emitter = new ProcessingFailureEmitter(journal, timeProvider, "risk-node-1");
         final UUID failedEventId = UUID.randomUUID();
 
-        final EventProcessingFailedEvent failure = emitter.emit(failedEventId, new IllegalStateException("boom"));
+        final EventProcessingFailedEvent failure = emitter.emit(failedEventId, new IllegalStateException("boom"), 3,
+                "risk-coordinator", "OrderFilledEvent", "ACC-1");
 
         assertEquals(1, journal.appendCalls);
         assertEquals(EventType.EventProcessingFailedEvent, failure.envelope().eventType());
-        assertNotNull(failure.envelope().idempotencyKey());
+        assertEquals("failed:" + failedEventId + ":3", failure.envelope().idempotencyKey());
         assertEquals(failure.envelope(), journal.appended.get(0));
+        assertEquals(3, failure.attemptNumber());
+        assertTrue(failure.isPermanent());
 
-        final String payloadText = new String(failure.envelope().payload(), StandardCharsets.UTF_8);
-        assertEquals(
-                String.join("|", failedEventId.toString(), IllegalStateException.class.getName(), "boom", "2026-04-24T10:00:00Z"),
-                payloadText
-        );
+        final EventProcessingFailedEvent decoded = EventProcessingFailedEvent.fromPayload(
+                failure.envelope().payload(), failure.envelope().payloadVersion());
+        assertEquals("risk-coordinator", decoded.sourceModule());
+        assertEquals("OrderFilledEvent", decoded.originalEventType());
+        assertEquals("ACC-1", decoded.failedAccountId());
         assertEquals(failedEventId.toString(), failure.envelope().localIntentId());
         assertNull(failure.envelope().correlationId());
     }
@@ -56,6 +59,21 @@ class ProcessingFailureEmitterTest {
 
         assertEquals(512, event.errorMessage().length());
         assertEquals('/', event.errorMessage().charAt(1));
+        assertEquals(1, event.attemptNumber());
+        assertEquals("unknown", event.sourceModule());
+    }
+
+    @Test
+    void shouldSupportLegacyEmitMethod() {
+        final RecordingJournal journal = new RecordingJournal();
+        final ControllableTimeProvider timeProvider = new ControllableTimeProvider(0L, Instant.parse("2026-04-24T10:00:00Z"));
+        final ProcessingFailureEmitter emitter = new ProcessingFailureEmitter(journal, timeProvider, "risk-node-1");
+
+        final EventProcessingFailedEvent event = emitter.emit(UUID.randomUUID(), new RuntimeException("boom"));
+
+        assertEquals(1, event.attemptNumber());
+        assertEquals("unknown", event.sourceModule());
+        assertNotNull(event.envelope());
     }
 
     @Test
