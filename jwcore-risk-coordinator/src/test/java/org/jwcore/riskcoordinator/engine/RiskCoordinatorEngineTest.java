@@ -257,7 +257,7 @@ class RiskCoordinatorEngineTest {
     }
 
     @Test
-    void shouldEscalateToSafeOnPermanentFailureWithKnownAccount() {
+    void shouldEscalateToSafeOnPermanentFailureWithKnownAccount() throws Exception {
         final ControllableTimeProvider time = new ControllableTimeProvider(7L, Instant.parse("2026-04-24T10:00:00Z"));
         final RecordingJournal journal = new RecordingJournal();
         final ProcessingFailureEmitter failureEmitter = new ProcessingFailureEmitter(journal, time, "risk-node-1");
@@ -265,13 +265,25 @@ class RiskCoordinatorEngineTest {
         final RiskCoordinatorEngine engine = new RiskCoordinatorEngine(
                 new ExposureLedger(), "risk-node-1", time, 3, Duration.ofSeconds(60), failureEmitter, failureCounter, journal);
 
-        final EventEnvelope malformedUnknown = unknown("crypto");
-        engine.apply(malformedUnknown);
-        engine.apply(malformedUnknown);
-        engine.apply(malformedUnknown);
+        // Setup canonical mapping crypto -> CanonicalId
+        engine.apply(submitted("crypto", 10.0));
+
+        // OrderFilledEvent bez wczesniejszego Intent -> ExposureLedger rzuca IllegalStateException
+        // extractedAccountId zostaje ustawione na "crypto" PRZED wyjatkiem -> permanent failure ma znany account
+        final EventEnvelope failingEvent = filled("crypto", OrderSide.BUY, "10", "100", "1");
+        engine.apply(failingEvent);  // attempt 1
+        engine.apply(failingEvent);  // attempt 2
+        engine.apply(failingEvent);  // attempt 3 -> permanent
 
         assertEquals(ExecutionState.SAFE, engine.currentStates().get("crypto"));
-        assertTrue(journal.appended.stream().anyMatch(e -> e.eventType() == EventType.AlertEvent));
+
+        final EventEnvelope alertEnvelope = journal.appended.stream()
+                .filter(e -> e.eventType() == EventType.AlertEvent)
+                .findFirst()
+                .orElseThrow();
+        final AlertEvent alert = AlertEvent.fromPayload(alertEnvelope.payload());
+        assertEquals(AlertType.PERMANENT_FAILURE, alert.alertType());
+        assertEquals(List.of("crypto"), alert.affectedAccounts());
     }
 
     @Test
@@ -319,6 +331,13 @@ class RiskCoordinatorEngineTest {
         final RiskCoordinatorEngine engine = new RiskCoordinatorEngine(
                 new ExposureLedger(), "risk-node-1", time, 3, Duration.ofSeconds(60), failureEmitter, failureCounter, journal);
 
+        // 2 znane konta zarejestrowane przez submitted (mapping canonical + accountStates)
+        engine.apply(submitted("crypto", 10.0));
+        engine.apply(unknown("crypto"));  // wpis w accountStates dla crypto
+        engine.apply(unknown("forex"));   // wpis w accountStates dla forex
+
+        // Malformed OrderFilledEvent -> exception, kontekst nieznany (extractedAccountId=null)
+        // -> eskalacja na wszystkie znane konta modulu (zasada 37)
         final EventEnvelope malformed = envelope(EventType.OrderFilledEvent, "invalid".getBytes());
         engine.apply(malformed);
         engine.apply(malformed);
@@ -329,7 +348,29 @@ class RiskCoordinatorEngineTest {
                 .findFirst().orElseThrow();
         final AlertEvent alert = AlertEvent.fromPayload(alertEnvelope.payload());
         assertEquals(AlertType.PERMANENT_FAILURE, alert.alertType());
-        assertTrue(alert.affectedAccounts().size() >= 0);
+        assertTrue(alert.affectedAccounts().contains("crypto"),
+                "affectedAccounts powinno zawierac crypto");
+        assertTrue(alert.affectedAccounts().contains("forex"),
+                "affectedAccounts powinno zawierac forex");
+    }
+
+    @Test
+    void shouldNotPartiallyCommitMapsOnExceptionAfterBindCanonical() {
+        final ControllableTimeProvider time = new ControllableTimeProvider(7L, Instant.parse("2026-04-24T10:00:00Z"));
+        final RecordingJournal journal = new RecordingJournal();
+        final ProcessingFailureEmitter failureEmitter = new ProcessingFailureEmitter(journal, time, "risk-node-1");
+        final FailureCounter failureCounter = new FailureCounter(journal);
+        final RiskCoordinatorEngine engine = new RiskCoordinatorEngine(
+                new ExposureLedger(), "risk-node-1", time, 3, Duration.ofSeconds(60), failureEmitter, failureCounter, journal);
+
+        // OrderFilledEvent bez wczesniejszego Intent -> ExposureLedger rzuca po wejsciu w branch Filled
+        // Test sprawdza ze canonicalByAccount NIE jest zmienione gdy exposureLedger rzuca (atomicity copy-before-commit)
+        final Map<String, CanonicalId> canonicalBefore = engine.canonicalSnapshot();
+        engine.apply(filled("crypto", OrderSide.BUY, "10", "100", "1"));
+        final Map<String, CanonicalId> canonicalAfter = engine.canonicalSnapshot();
+
+        assertEquals(canonicalBefore, canonicalAfter,
+                "canonicalByAccount nie moze byc zmienione gdy exposureLedger rzuca");
     }
 
     @Test

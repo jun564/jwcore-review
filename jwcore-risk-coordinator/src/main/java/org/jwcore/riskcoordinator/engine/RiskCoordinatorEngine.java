@@ -136,6 +136,7 @@ public final class RiskCoordinatorEngine {
 
     public Set<String> apply(final EventEnvelope envelope) {
         Objects.requireNonNull(envelope, "envelope cannot be null");
+        String extractedAccountId = null;  // ADR-017 Faza 2: kontekst zachowany przed wyjatkiem
         // ADR-017 Faza 1: copy-before-commit for RiskCoordinatorEngine-owned maps.
         // Mutations of accountStates, canonicalByAccount, exposureByAccount and
         // unknownTimestamps must be committed via AtomicReference.set() only after
@@ -143,6 +144,7 @@ public final class RiskCoordinatorEngine {
         try {
             if (envelope.eventType() == EventType.OrderSubmittedEvent) {
                 final OrderSubmittedEvent event = OrderSubmittedEvent.fromPayload(envelope.payload());
+                extractedAccountId = event.accountId();
                 bindCanonicalToAccount(event.accountId(), event.canonicalId());
                 recomputeExposure(event.accountId());
                 return Set.of(event.accountId());
@@ -150,6 +152,7 @@ public final class RiskCoordinatorEngine {
             if (envelope.eventType() == EventType.OrderIntentEvent) {
                 final OrderIntentEvent event = OrderIntentEvent.fromPayload(envelope.payload());
                 final String accountId = event.accountId();
+                extractedAccountId = accountId;
                 if (isHalted(accountId)) {
                     return Set.of(accountId);
                 }
@@ -159,28 +162,43 @@ public final class RiskCoordinatorEngine {
             if (envelope.eventType() == EventType.OrderFilledEvent) {
                 final OrderFilledEvent event = OrderFilledEvent.fromPayload(envelope.payload());
                 final String accountId = resolveAccountId(event.canonicalId());
+                extractedAccountId = accountId;
                 if (isHalted(accountId)) {
                     return Set.of(accountId);
                 }
-                bindCanonicalToAccount(accountId, event.canonicalId());
-                exposureLedger.apply(envelope);
-                recomputeExposure(accountId);
+                // ADR-017 Faza 2: copy-before-commit - mapy modyfikowane lokalnie, commit po sukcesie
+                final Map<String, CanonicalId> nextCanonical = new HashMap<>(canonicalByAccount.get());
+                nextCanonical.put(accountId, event.canonicalId());
+                exposureLedger.apply(envelope);  // moze rzucic - mapy jeszcze nie commitowane
+                final java.math.BigDecimal exposure = calculateExposure(nextCanonical, accountId);
+                canonicalByAccount.set(Collections.unmodifiableMap(nextCanonical));
+                final Map<String, java.math.BigDecimal> nextExposure = new HashMap<>(exposureByAccount.get());
+                nextExposure.put(accountId, exposure);
+                exposureByAccount.set(Collections.unmodifiableMap(nextExposure));
                 return Set.of(accountId);
             }
             if (envelope.eventType() == EventType.OrderCanceledEvent) {
                 final OrderCanceledEvent event = OrderCanceledEvent.fromPayload(envelope.payload());
                 final String accountId = resolveAccountId(event.canonicalId());
+                extractedAccountId = accountId;
                 if (isHalted(accountId)) {
                     return Set.of(accountId);
                 }
-                bindCanonicalToAccount(accountId, event.canonicalId());
+                // ADR-017 Faza 2: copy-before-commit
+                final Map<String, CanonicalId> nextCanonical = new HashMap<>(canonicalByAccount.get());
+                nextCanonical.put(accountId, event.canonicalId());
                 exposureLedger.apply(envelope);
-                recomputeExposure(accountId);
+                final java.math.BigDecimal exposure = calculateExposure(nextCanonical, accountId);
+                canonicalByAccount.set(Collections.unmodifiableMap(nextCanonical));
+                final Map<String, java.math.BigDecimal> nextExposure = new HashMap<>(exposureByAccount.get());
+                nextExposure.put(accountId, exposure);
+                exposureByAccount.set(Collections.unmodifiableMap(nextExposure));
                 return Set.of(accountId);
             }
             if (envelope.eventType() == EventType.OrderRejectedEvent) {
                 final OrderRejectedEvent event = OrderRejectedEvent.fromPayload(envelope.payload());
                 final String accountId = envelope.canonicalId() == null ? event.accountId() : resolveAccountId(envelope.canonicalId());
+                extractedAccountId = accountId;
                 if (isHalted(accountId)) {
                     return Set.of(accountId);
                 }
@@ -190,6 +208,7 @@ public final class RiskCoordinatorEngine {
             }
             if (envelope.eventType() == EventType.OrderUnknownEvent) {
                 final OrderUnknownEvent event = OrderUnknownEvent.fromPayload(envelope.payload());
+                extractedAccountId = event.accountId();
                 setAccountState(event.accountId(), ExecutionState.SAFE);
                 final CanonicalId canonicalId = canonicalByAccount.get().get(event.accountId());
                 if (canonicalId != null) {
@@ -206,7 +225,7 @@ public final class RiskCoordinatorEngine {
             if (failureEmitter != null) {
                 try {
                     final int attemptNumber = failureCounter == null ? 1 : failureCounter.nextAttemptNumber(envelope.eventId());
-                    final String failedAccountId = tryExtractAccountId(envelope);
+                    final String failedAccountId = resolveFailureAccountId(extractedAccountId, envelope);
                     final String originalEventType = envelope.eventType() == null ? null : envelope.eventType().name();
                     final EventProcessingFailedEvent failure = failureEmitter.emit(
                             envelope.eventId(),
@@ -425,10 +444,11 @@ public final class RiskCoordinatorEngine {
         final Map<String, ExecutionState> nextStates = new HashMap<>(accountStates.get());
         final List<String> affectedAccounts = new ArrayList<>();
 
-        if (failedAccountId != null) {
+        if (isKnownAccountId(failedAccountId)) {
             nextStates.put(failedAccountId, ExecutionState.SAFE);
             affectedAccounts.add(failedAccountId);
         } else {
+            // Nieznany kontekst -> wszystkie znane konta modulu (zasada 37)
             for (final String accountId : nextStates.keySet()) {
                 nextStates.put(accountId, ExecutionState.SAFE);
                 affectedAccounts.add(accountId);
@@ -438,9 +458,41 @@ public final class RiskCoordinatorEngine {
         accountStates.set(Collections.unmodifiableMap(nextStates));
 
         if (alertJournal != null) {
-            final AlertEvent alert = buildPermanentFailureAlert(failedAccountId, affectedAccounts, failure);
+            final AlertEvent alert = buildPermanentFailureAlert(
+                    isKnownAccountId(failedAccountId) ? failedAccountId : null,
+                    affectedAccounts,
+                    failure);
             alertJournal.append(alertEnvelopeFactory.buildEnvelope(alert));
         }
+    }
+
+    private boolean isKnownAccountId(final String accountId) {
+        return accountId != null
+                && !accountId.isBlank()
+                && !"unknown".equalsIgnoreCase(accountId);
+    }
+
+    private String resolveFailureAccountId(final String extractedAccountId, final EventEnvelope envelope) {
+        if (extractedAccountId != null && !extractedAccountId.isBlank()) {
+            return extractedAccountId;
+        }
+        return tryExtractAccountId(envelope);
+    }
+
+    private java.math.BigDecimal calculateExposure(final Map<String, CanonicalId> canonicalSnapshot,
+                                                   final String accountId) {
+        if (accountId == null || accountId.isBlank()) {
+            return java.math.BigDecimal.ZERO;
+        }
+        final CanonicalId canonicalId = canonicalSnapshot.get(accountId);
+        if (canonicalId == null) {
+            return java.math.BigDecimal.ZERO;
+        }
+        return exposureLedger.netPosition(canonicalId).abs().multiply(exposureLedger.averageEntryPrice(canonicalId));
+    }
+
+    Map<String, CanonicalId> canonicalSnapshot() { // test visibility - ADR-017 Faza 2
+        return Collections.unmodifiableMap(canonicalByAccount.get());
     }
 
     private AlertEvent buildPermanentFailureAlert(final String failedAccountId,
