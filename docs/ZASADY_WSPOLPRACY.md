@@ -83,7 +83,7 @@ Lista zasad jest ponumerowana i zachowuje ciągłość między wersjami.
 
 **31.** **NOWA (22.04.2026) — Wyjątek build-fix dla Claude Code.** Dla trywialnych błędów kompilacji/syntax (final, dostosowanie wywołań do nowego API, importy, usunięcie martwego kodu) — Claude Code MOŻE sam poprawić pod kontrolą Claude QG, bez chodzenia do Codex. Zabronione dla Code: zmiana logiki biznesowej, nowa logika księgowania/ryzyka/egzekucji, nowe testy, nowe API. Claude QG opisuje dokładny zakres fixu w prompcie, Code raportuje każdą zmianę w raporcie. Powód: pragmatyka — Codex traci po 2 iteracje na build-fix który Code załatwia w minutę.
 
-## Zasady procesu sesji (32–35)
+## Zasady procesu sesji (32–36)
 
 **32.** Weryfikacja stanu repo na starcie sesji. Claude na starcie każdej sesji prosi Code o `git log --oneline -20` z datami ZANIM zaufa swojej pamięci trwałej. Paczki mogą być wypchnięte między sesjami.
 
@@ -93,9 +93,14 @@ Lista zasad jest ponumerowana i zachowuje ciągłość między wersjami.
 
 **35.** Organizacja plików lokalnych. Żadnych plików na pulpicie Architekta. Lokalizacja projektowa: `C:\Users\janus\Desktop\Janusz\SIT Polska\TRADEROWO\schematy AI\Farma JWCore`. Wewnątrz — tematyczne podfoldery. Prompty dla Code w `prompty dla Code`.
 
+**36.** Rozbicie paczek. Jesli paczka rozbija sie o fakty z kodu (blokery w istniejacych strukturach danych, brakujace API, breaking changes wymagane w wielu miejscach), zespol AI ma obowiazek zaproponowac rozbicie na mniejsze paczki zamiast forsowac pelny zakres w jednej iteracji. Minimum Viable najpierw, pelna implementacja w osobnej paczce. Decyzja nalezy do Architekta. Precedens: Paczka 4C2/B (24.04.2026) zostala rozbita na Faze 1 (minimum viable error isolation) i Faze 2 (4C2/C - pelne rozszerzenie EventProcessingFailedEvent) po odkryciu blokera: idempotency key deterministyczny po payload uniemozliwial retry counter z journala bez rozszerzenia eventu do wersji v3.
+
 ---
 
 ## Changelog
+
+**v1.3 (25.04.2026)**
+- Dodanie zasady 36 (Rozbicie paczek) na bazie precedensu 4C2/B z 24.04.2026
 
 **v1.2 (22.04.2026 wieczór)**
 - Dodano zasady 30 (walidacja zależności w promptach Codex) i 31 (wyjątek build-fix Code) po doświadczeniu z Paczką 4A (3 iteracje build-fix z powodu braku Maven w Codex)
