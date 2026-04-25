@@ -11,6 +11,7 @@ import org.jwcore.domain.EventType;
 import org.jwcore.domain.events.AlertEvent;
 import org.jwcore.domain.events.AlertSeverity;
 import org.jwcore.domain.events.AlertType;
+import org.jwcore.domain.events.EventProcessingFailedEvent;
 import org.jwcore.domain.events.OrderCanceledEvent;
 import org.jwcore.domain.events.OrderFilledEvent;
 import org.jwcore.domain.events.OrderIntentEvent;

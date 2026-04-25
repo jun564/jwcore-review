@@ -73,6 +73,6 @@ class AlertEventTest {
         assertThrows(IllegalArgumentException.class, () -> new AlertEvent(UUID.randomUUID(), "a", AlertSeverity.INFO, null, ExecutionState.RUN, AlertType.STATE_TRANSITION, " ", List.of(), Instant.now(), List.of()));
         assertThrows(IllegalArgumentException.class, () -> new AlertEvent(UUID.randomUUID(), "a", AlertSeverity.INFO, null, ExecutionState.RUN, AlertType.STATE_TRANSITION, "r", List.of("1", "2", "3", "4"), Instant.now(), List.of()));
         assertThrows(IllegalArgumentException.class, () -> new AlertEvent(UUID.randomUUID(), "a", AlertSeverity.INFO, null, null, AlertType.STATE_TRANSITION, "r", List.of(), Instant.now(), List.of()));
-        assertThrows(IllegalArgumentException.class, () -> new AlertEvent(UUID.randomUUID(), "a", AlertSeverity.INFO, null, null, AlertType.MANUAL_RESET, "r", List.of(), Instant.now(), java.util.stream.Stream.generate(() -> "x").limit(21).toList()));
+        assertThrows(IllegalArgumentException.class, () -> new AlertEvent(UUID.randomUUID(), "a", AlertSeverity.INFO, null, null, AlertType.MANUAL_RESET, "r", List.of(), Instant.now(), java.util.stream.Stream.generate(() -> "x").limit(101).toList()));
     }
 }

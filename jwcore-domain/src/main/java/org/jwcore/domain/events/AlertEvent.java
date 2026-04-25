@@ -27,7 +27,7 @@ public record AlertEvent(
         List<String> affectedAccounts) {
 
     private static final int PAYLOAD_VERSION = 2;
-    private static final int MAX_AFFECTED_ACCOUNTS = 20;
+    private static final int MAX_AFFECTED_ACCOUNTS = 100;
 
     public AlertEvent {
         Objects.requireNonNull(alertId, "alertId cannot be null");
@@ -48,7 +48,7 @@ public record AlertEvent(
             throw new IllegalArgumentException("brokerOrderIds cannot exceed 3 elements");
         }
         if (affectedAccounts.size() > MAX_AFFECTED_ACCOUNTS) {
-            throw new IllegalArgumentException("affectedAccounts cannot exceed 20 elements");
+            throw new IllegalArgumentException("affectedAccounts cannot exceed 100 elements");
         }
         if (alertType == AlertType.STATE_TRANSITION && transitionTo == null) {
             throw new IllegalArgumentException("transitionTo cannot be null for STATE_TRANSITION");

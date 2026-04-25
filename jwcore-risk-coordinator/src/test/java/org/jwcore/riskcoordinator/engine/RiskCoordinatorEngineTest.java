@@ -10,6 +10,8 @@ import org.jwcore.domain.EventEnvelope;
 import org.jwcore.domain.EventType;
 import org.jwcore.domain.IdempotencyKeys;
 import org.jwcore.domain.events.AlertEvent;
+import org.jwcore.domain.events.AlertType;
+import org.jwcore.domain.events.EventProcessingFailedEvent;
 import org.jwcore.domain.OrderSide;
 import org.jwcore.domain.events.OrderIntentEvent;
 import org.jwcore.domain.events.OrderCanceledEvent;
