@@ -6,7 +6,7 @@ import org.jwcore.core.shutdown.GracefulShutdownParticipant;
 import org.jwcore.core.time.RealTimeProvider;
 import org.jwcore.execution.common.state.ExecutionState;
 import org.jwcore.execution.forex.app.support.InMemoryEventJournal;
-import org.jwcore.execution.forex.broker.StubBrokerSession;
+import org.jwcore.execution.common.broker.StubBrokerSession;
 import org.jwcore.execution.forex.config.ExecutionPropertiesLoader;
 import org.jwcore.execution.forex.runtime.ExecutionRuntime;
 import org.jwcore.execution.forex.runtime.ExecutionRuntimeConfig;
@@ -30,7 +30,7 @@ public final class Main {
         Objects.requireNonNull(eventJournal, "eventJournal cannot be null");
         final InputStream inputStream = Main.class.getResourceAsStream("/forex.properties");
         final ExecutionRuntimeConfig config = new ExecutionPropertiesLoader().load(inputStream, "forex");
-        final ExecutionRuntime runtime = new ExecutionRuntime(config, eventJournal, new RealTimeProvider(), new StubBrokerSession(), snapshot -> ExecutionState.RUN);
+        final ExecutionRuntime runtime = new ExecutionRuntime(config, eventJournal, new RealTimeProvider(), new StubBrokerSession("FOREX-ORD-"), snapshot -> ExecutionState.RUN);
         final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> new Thread(r, "jwcore-execution-forex-tick"));
         final GracefulShutdownCoordinator coordinator = new GracefulShutdownCoordinator(Duration.ofSeconds(10), thread -> Runtime.getRuntime().addShutdownHook(thread));
         coordinator.register(new GracefulShutdownParticipant() {
