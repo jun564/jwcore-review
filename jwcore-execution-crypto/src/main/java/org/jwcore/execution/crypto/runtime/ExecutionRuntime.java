@@ -13,7 +13,7 @@ import org.jwcore.execution.common.registry.IntentRegistry;
 import org.jwcore.execution.common.runtime.PendingIntent;
 import org.jwcore.execution.common.state.ExecutionState;
 import org.jwcore.execution.common.state.ExecutionStateResolver;
-import org.jwcore.execution.crypto.broker.BrokerSession;
+import org.jwcore.execution.common.broker.BrokerSession;
 import org.jwcore.execution.crypto.risk.LocalRiskPolicy;
 import org.jwcore.execution.crypto.risk.LocalRiskSnapshot;
 

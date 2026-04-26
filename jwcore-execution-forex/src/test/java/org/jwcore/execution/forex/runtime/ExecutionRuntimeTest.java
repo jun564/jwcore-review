@@ -8,7 +8,7 @@ import org.jwcore.domain.IdempotencyKeys;
 import org.jwcore.execution.common.emit.EventEmitter;
 import org.jwcore.execution.common.registry.IntentRegistry;
 import org.jwcore.execution.common.state.ExecutionState;
-import org.jwcore.execution.forex.broker.StubBrokerSession;
+import org.jwcore.execution.common.broker.StubBrokerSession;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
@@ -24,7 +24,7 @@ class ExecutionRuntimeTest {
     void shouldEmitOrderSubmittedAfterBrokerSubmit() {
         final var journal = new InMemoryEventJournal();
         final var time = new ControllableTimeProvider(1L, Instant.parse("2026-04-19T08:00:00Z"));
-        final var brokerSession = new StubBrokerSession();
+        final var brokerSession = new StubBrokerSession("FOREX-ORD-");
         final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.RUN, 5, 30, 10, 100_000);
 
         final UUID intentId = UUID.randomUUID();
@@ -51,7 +51,7 @@ class ExecutionRuntimeTest {
     void shouldEmitBrokerTimeoutAsOrderUnknownAfterSubmit() {
         final var journal = new InMemoryEventJournal();
         final var time = new ControllableTimeProvider(1L, Instant.parse("2026-04-19T08:00:00Z"));
-        final var brokerSession = new StubBrokerSession();
+        final var brokerSession = new StubBrokerSession("FOREX-ORD-");
         final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.RUN, 5, 6, 10, 100_000);
 
         final UUID intentId = UUID.randomUUID();
@@ -75,7 +75,7 @@ class ExecutionRuntimeTest {
     void shouldProcessOrderIntentInRunStateAndEmitTimeoutAndMargin() {
         final var journal = new InMemoryEventJournal();
         final var time = new ControllableTimeProvider(1L, Instant.parse("2026-04-19T08:00:00Z"));
-        final var brokerSession = new StubBrokerSession();
+        final var brokerSession = new StubBrokerSession("FOREX-ORD-");
         final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.RUN, 5, 30, 2, 100_000);
 
         journal.append(orderIntentEvent(time, UUID.randomUUID(), "forex-account|BTCUSDT|0.10", "S07:I03:VA07-03:BA01"));
@@ -95,7 +95,7 @@ class ExecutionRuntimeTest {
     void shouldTransitionToSafeOnRiskDecisionForOwnAccount() {
         final var journal = new InMemoryEventJournal();
         final var time = new ControllableTimeProvider(1L, Instant.parse("2026-04-19T08:00:00Z"));
-        final var brokerSession = new StubBrokerSession();
+        final var brokerSession = new StubBrokerSession("FOREX-ORD-");
         final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.RUN, 5, 30, 5, 100_000);
         final EventEmitter emitter = new EventEmitter(journal, time);
         journal.append(emitter.createRiskDecisionEvent("forex", ExecutionState.SAFE, "test-safe").envelope());
@@ -108,7 +108,7 @@ class ExecutionRuntimeTest {
     void shouldIgnoreRiskDecisionForOtherAccount() {
         final var journal = new InMemoryEventJournal();
         final var time = new ControllableTimeProvider(1L, Instant.parse("2026-04-19T08:00:00Z"));
-        final var brokerSession = new StubBrokerSession();
+        final var brokerSession = new StubBrokerSession("FOREX-ORD-");
         final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.RUN, 5, 30, 5, 100_000);
         final EventEmitter emitter = new EventEmitter(journal, time);
         journal.append(emitter.createRiskDecisionEvent("crypto", ExecutionState.HALT, "test-halt").envelope());
@@ -121,7 +121,7 @@ class ExecutionRuntimeTest {
     void shouldIgnoreOrderIntentInSafeStateButStillTriggerTimeouts() {
         final var journal = new InMemoryEventJournal();
         final var time = new ControllableTimeProvider(1L, Instant.parse("2026-04-19T08:00:00Z"));
-        final var brokerSession = new StubBrokerSession();
+        final var brokerSession = new StubBrokerSession("FOREX-ORD-");
         final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.SAFE, 5, 30, 10, 100_000);
 
         final UUID rejectedIntentId = UUID.randomUUID();
@@ -157,7 +157,7 @@ class ExecutionRuntimeTest {
     void shouldRejectOrderIntentInHaltStateWithEvent() {
         final var journal = new InMemoryEventJournal();
         final var time = new ControllableTimeProvider(1L, Instant.parse("2026-04-19T08:00:00Z"));
-        final var brokerSession = new StubBrokerSession();
+        final var brokerSession = new StubBrokerSession("FOREX-ORD-");
         final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.HALT, 5, 30, 10, 100_000);
 
         final UUID rejectedIntentId = UUID.randomUUID();
@@ -193,7 +193,7 @@ class ExecutionRuntimeTest {
     void shouldStayInKillStateAndIgnoreOrderIntents() {
         final var journal = new InMemoryEventJournal();
         final var time = new ControllableTimeProvider(1L, Instant.parse("2026-04-19T08:00:00Z"));
-        final var brokerSession = new StubBrokerSession();
+        final var brokerSession = new StubBrokerSession("FOREX-ORD-");
         final EventEmitter emitter = new EventEmitter(journal, time);
         journal.append(emitter.createRiskDecisionEvent("forex", ExecutionState.KILL, "operator kill").envelope());
         journal.append(orderIntentEvent(time, UUID.randomUUID(), "forex-account|BTCUSDT|0.10", "S07:I03:VA07-03:BA01"));
@@ -209,7 +209,7 @@ class ExecutionRuntimeTest {
     void shouldRequireRunDecisionToExitHalt() {
         final var journal = new InMemoryEventJournal();
         final var time = new ControllableTimeProvider(1L, Instant.parse("2026-04-19T08:00:00Z"));
-        final var brokerSession = new StubBrokerSession();
+        final var brokerSession = new StubBrokerSession("FOREX-ORD-");
         final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.RUN, 5, 30, 10, 100_000);
         final EventEmitter emitter = new EventEmitter(journal, time);
 
@@ -235,7 +235,7 @@ class ExecutionRuntimeTest {
     void shouldHandleEmptyCycleAndEmitMarginOnlyOnConfiguredInterval() {
         final var journal = new InMemoryEventJournal();
         final var time = new ControllableTimeProvider(1L, Instant.parse("2026-04-19T08:00:00Z"));
-        final var brokerSession = new StubBrokerSession();
+        final var brokerSession = new StubBrokerSession("FOREX-ORD-");
         final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.RUN, 5, 30, 3, 100_000);
 
         runtime.tickCycle();
@@ -252,7 +252,7 @@ class ExecutionRuntimeTest {
     void shouldEmitThreeTimeoutsInSingleCycleWithoutFailure() {
         final var journal = new InMemoryEventJournal();
         final var time = new ControllableTimeProvider(1L, Instant.parse("2026-04-19T08:00:00Z"));
-        final var brokerSession = new StubBrokerSession();
+        final var brokerSession = new StubBrokerSession("FOREX-ORD-");
         final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.RUN, 5, 30, 10, 100_000);
 
         journal.append(orderIntentEvent(time, UUID.randomUUID(), "forex-account|BTCUSDT|0.10", "S07:I03:VA07-03:BA01"));
@@ -271,7 +271,7 @@ class ExecutionRuntimeTest {
     void shouldBoundProcessedEventIdsUsingConfiguredCapacity() {
         final var journal = new InMemoryEventJournal();
         final var time = new ControllableTimeProvider(1L, Instant.parse("2026-04-19T08:00:00Z"));
-        final var brokerSession = new StubBrokerSession();
+        final var brokerSession = new StubBrokerSession("FOREX-ORD-");
         final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.RUN, 5, 30, 100, 2);
 
         final UUID intentId = UUID.randomUUID();
@@ -291,7 +291,7 @@ class ExecutionRuntimeTest {
     void shouldContinueTickCycleAfterBadEvent() {
         final var journal = new InMemoryEventJournal();
         final var time = new ControllableTimeProvider(1L, Instant.parse("2026-04-19T08:00:00Z"));
-        final var brokerSession = new StubBrokerSession();
+        final var brokerSession = new StubBrokerSession("FOREX-ORD-");
         final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.RUN, 5, 30, 100, 100_000);
 
         final EventEnvelope okFirst = orderIntentEvent(time, UUID.randomUUID(), "forex-account|BTCUSDT|0.10", "S07:I03:VA07-03:BA01");
@@ -319,7 +319,7 @@ class ExecutionRuntimeTest {
     void shouldEmitFailedEventForBrokenUuid() {
         final var journal = new InMemoryEventJournal();
         final var time = new ControllableTimeProvider(1L, Instant.parse("2026-04-19T08:00:00Z"));
-        final var brokerSession = new StubBrokerSession();
+        final var brokerSession = new StubBrokerSession("FOREX-ORD-");
         final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.RUN, 5, 30, 100, 100_000);
 
         final EventEnvelope malformedUuidEvent = orderIntentEventWithLocalIntentId(
@@ -343,7 +343,7 @@ class ExecutionRuntimeTest {
     void shouldPreventDuplicateIntentAfterMarkTerminal() {
         final var journal = new InMemoryEventJournal();
         final var time = new ControllableTimeProvider(1L, Instant.parse("2026-04-19T08:00:00Z"));
-        final var brokerSession = new StubBrokerSession();
+        final var brokerSession = new StubBrokerSession("FOREX-ORD-");
         final var runtime = runtime(journal, time, brokerSession, snapshot -> ExecutionState.RUN, 5, 30, 100, 100_000);
         final UUID intentId = UUID.randomUUID();
 
