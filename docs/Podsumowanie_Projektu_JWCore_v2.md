@@ -98,15 +98,11 @@ Najistotniejsze świeże (22.04.2026):
 
 ## Długi techniczne — priorytety
 
-**BLOKUJĄCE PoC JForex:**
-- DŁUG-314 — Reconnect/reconcile w BrokerSession (Paczka 4B)
-
-**Oczyszczenie w 4B+:**
-- DŁUG-318 — Przepisanie 5 @Disabled testów RiskCoordinatorEngine pod nowy model z 4A
+**BLOKUJĄCE PoC JForex:** brak (DŁUG-314 zamknięty w 4B1).
 
 **Pozostałe:** DŁUG-301, 302, 303, 304, 306, 307, 308, 310, 312, 315, 317 — otwarte, żaden nie blokuje PoC.
 
-**Zamknięte 22.04.2026:** DŁUG-305 (OrderTimeoutMonitor sync), DŁUG-309 (pełna pozycja finansowa), DŁUG-311 (tailer offset), DŁUG-313 (rename), DŁUG-316 (workflow sync-to-review).
+**Zamknięte 22.04–25.04.2026:** DŁUG-305 (OrderTimeoutMonitor sync), DŁUG-309 (pełna pozycja finansowa), DŁUG-311 (tailer offset), DŁUG-313 (rename), DŁUG-316 (workflow sync-to-review), DŁUG-314 (BrokerSession reconnect/reconcile, 4B1 PR #18, 23.04), DŁUG-318 (5 testów @Disabled przepisane, 4B2 PR #19, 23.04). Paczki: 4B1, 4B2, 4C1, 4C2/A, 4C2/B (ADR-017 Faza 1), 4C2/C (ADR-017 Faza 2).
 
 ## Historia 22.04.2026 (skrót)
 
@@ -120,8 +116,5 @@ Najistotniejsze świeże (22.04.2026):
 
 ## Co dalej
 
-Kolejność logiczna:
-1. Paczka 4B — reconnect/reconcile + 5 testów
-2. Paczka 4D — Advanced Stub Broker
-3. Paczka 5 — PoC JForex (demo)
-4. Paczka 4C (równolegle) — alerting + error isolation
+1. Paczka 4D — Advanced Stub Broker (ostatni bloker PoC JForex Etap 1)
+2. Paczka 5 — PoC JForex Etap 1 (Dukascopy demo, mandatory)

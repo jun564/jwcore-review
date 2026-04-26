@@ -2,7 +2,7 @@
 
 **Wersja:** 1.1 (22.04.2026 wieczór)
 **Branch:** main
-**Ostatni commit merge:** d39e7c1 (Paczka 4A)
+**Ostatni commit merge:** 818f1f3 (PR #24, Paczka 4C2/C). HEAD main: 311bc32 (docs sesji 25.04).
 
 ---
 
@@ -41,7 +41,27 @@ Reguły księgowania:
 - Reverse/close: realizedPnL z różnicy ceny × zamknięta ilość
 - Pełne zamknięcie: netPosition = 0, avgEntryPrice = ZERO (nie null)
 
-Fail-fast `IllegalStateException` przy terminalnym evencie (cancel/reject/fill) bez pending intent — polityka MVP 4A dla lokalnie spójnego event stream. NIE dotyczy reconcile po reconnect (to 4B).
+Fail-fast `IllegalStateException` przy terminalnym evencie (cancel/reject/fill) bez pending intent — polityka MVP 4A dla lokalnie spójnego event stream. NIE dotyczy reconcile po reconnect (to 4B1).
+
+### BrokerSession reconnect/reconcile (Paczka 4B1, jwcore-adapter-jforex)
+
+Mechanizm reconnect po zerwaniu połączenia + emisja `BrokerReconcileEvent` po stabilizacji. Polityka reconcile rozszerzona poza fail-fast `IllegalStateException` z 4A. **DŁUG-314 zamknięty.**
+
+### RiskCoordinator escalation (Paczka 4C1, jwcore-risk-coordinator)
+
+`SAFE→HALT` przy powtórzonym `OrderUnknown` w oknie czasowym + `RiskStateResetCommand` do manualnego resetu. `ITimeProvider` dla testów deterministycznych. Wariant D Architekta wdrożony.
+
+### AlertEvent + adapter-alerting (Paczka 4C2/A, jwcore-adapter-alerting)
+
+`AlertType` (HALT, PERMANENT_FAILURE), Telegram bot + JUL panel. Tekst alertów zgodny z zasadą 37 (system autonomiczny, brak presji „natychmiast").
+
+### ProcessingFailureEmitter (Paczka 4C2/B, ADR-017 Faza 1)
+
+Error isolation w `RiskCoordinatorEngine` — wyjątki przy przetwarzaniu eventów nie wywalają silnika, są journalowane jako `EventProcessingFailedEvent`. Ujednolicenie wzorca `try/catch → emit → continue` z `ExecutionRuntime`.
+
+### Auto-eskalacja SAFE (Paczka 4C2/C, ADR-017 Faza 2)
+
+`EventProcessingFailedEvent` v3 (5 nowych pól: `attemptNumber`, `isPermanent`, `sourceModule`, `originalEventType`, `failedAccountId`), `AlertEvent` v2 (multi-account z `affectedAccounts`), `FailureCounter` (LRU 10k + TTL 24h, journal jako source of truth), auto-eskalacja przy permanent failure (3 attempts), atomicity copy-before-commit dla map silnika.
 
 ### OrderTimeoutMonitor (Paczka 4A, jwcore-core)
 
@@ -92,8 +112,5 @@ Historia 4A: 2 iteracje build-fix przez Codex (final w teście, stare API w kons
 
 ## Co dalej
 
-Priorytet logiczny z backlogu:
-1. Paczka 4B — DŁUG-314 reconnect/reconcile + przepisanie 5 testów @Disabled pod nowy model
-2. Paczka 4D — Advanced Stub Broker
-3. Paczka 5 — PoC JForex (Etap 1 na demo)
-4. Paczka 4C — alerting + error isolation (może iść równolegle z 4B)
+1. Paczka 4D — Advanced Stub Broker (simulator egzekucji, timeouty, reject, partial fill, stan konta + testy integracyjne execution runtime ↔ stub broker). **Ostatni bloker PoC JForex Etap 1.**
+2. Paczka 5 — PoC JForex Etap 1 (adapter JForex SDK, mapowanie eventów, demo Dukascopy).
